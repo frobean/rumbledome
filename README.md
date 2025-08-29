@@ -1,13 +1,12 @@
-# RumbleDome Project Meta
+# RumbleDome — Meta Docs (Baseline)
 
-This repository contains design and implementation specifications for the RumbleDome project.
+This bundle contains the **baseline, non-placeholder** documents we agreed to keep as the source of truth.
 
-## Contents
-- docs/Context.md
-- docs/DesignSpec.md
-- docs/ImplementationSpec.md
-- docs/Interfaces.md
-- docs/CalibrationAndDefaults.md
-- docs/TestPlan.md
-- docs/MustNotDrop.md
-- docs/CAN_Signals.md
+- See `/docs/Context.md` for the full project context/spec.
+- See `/docs/MustNotDrop.md` for invariants we never regress.
+- See `/docs/ImplementationSpec.md` and `/docs/Interfaces.md` for module boundaries & APIs.
+- See `/docs/CalibrationAndDefaults.md` for initial values.
+- See `/docs/TestPlan.md` for unit/integration/HIL coverage.
+- See `/docs/CAN_Signals.md` for *SPECULATIVE* Gen2 Coyote CAN notes to be replaced by verified signals.
+
+Generated: 2025-08-29 20:09 UTC
