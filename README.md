@@ -86,10 +86,11 @@ When assisting with this project, the AI must:
 4. **Work module-by-module**: respect API contracts, don’t introduce cross-cutting hacks.  
 5. **Document assumptions clearly**: mark speculative areas with `⚠ SPECULATIVE` so the human knows to verify.  
 6. **Preserve clarity and style**: verbose variable names, self-documenting code, proper comments for math/algorithms.  
-7. **Fail safe in code paths**: defaults and error states must never result in uncontrolled boost.  
-8. **Keep testability in mind**: unit tests must be able to run with fake data without hardware.  
-9. **Surface gaps**: if required details are missing from the spec, pause and request clarification rather than guessing silently.  
-10. **Respect layering**: HAL abstractions first, hardware-specific logic later.  
+7. **Approachability in generated code/docs**: Never assume the reader is an expert in the math, jargon, microcontroller, physics, or theory.
+8. **Fail safe in code paths**: defaults and error states must never result in uncontrolled boost.  
+9. **Keep testability in mind**: unit tests must be able to run with fake data without hardware.  
+10. **Surface gaps**: if required details are missing from the spec, pause and request clarification rather than guessing silently.  
+11. **Respect layering**: HAL abstractions first, hardware-specific logic later.  
 
 ---
 
@@ -115,25 +116,6 @@ When assisting with this project, the AI must:
 - Always anchor to this README on reset.  
 - Never assume missing context → fetch from specs.  
 - Output must align with module APIs and coding conventions.  
-
----
-
-## NOTE and WARNING
-This project is experimental on basically every level.  I am working through it to teach myself a number of things:
-- Rust as a programming language
-- AI - how to design and structure a development process that makes use of AI to produce consistent and usable results without ending up with a complete pile of trash at the end.  I want the AI to be able to work and reason somewhat autonoously, but I reserve the control to override any decision anywhere in the code.
-- Microcontroller programming - this is my first from-scratch firmware
-- Electronic boost control theory and physics - I have a very specific goal I am aiming for in the level of integration and control between my aftermarket turbo system and the OEM systems
-- Ford CAN bus, specifically for the stock (non FRRP) gen 2 coyote engine management
-- Basic electronics - because why bother learning with blinky LEDs and elementary exercises when I have a fun idea that no one else has ever built along with the potential to blow up an expensive engine if things go south...
-
-I'm making this open source and available on the off chance that someone else might find it interesting or educational.
-
-Under no circumstances can this code or concept be taken as the basis for a commercial product without my express written approval.  If you violate this, then may the fleas of a thousand camels infest your nethers.
-
-Under no circumstances are you to blame me if you do use this and damage your engine, your health, or your sanity, or any one else's engine, health, sanity, underwear, dog, etc.  
-
-Consider yourself warned.
 
 ---
 
