@@ -4,17 +4,22 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - '.rd-manifest.json'   # <- prevent self-trigger
-  workflow_dispatch:          # <- allow manual runs (handy!)
+      - '.rd-manifest.json'   # prevent self-trigger loops
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-manifest:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # full history for timestamps & SHAs
+          persist-credentials: true
 
       - name: Generate manifest
         shell: bash
@@ -23,11 +28,12 @@ jobs:
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
           COMMIT="${{ github.sha }}"
-          # Use commit time instead of "now" to reduce spurious diffs
           DATE="$(git show -s --format=%cI "${COMMIT}")"
 
-          INCLUDE_DIRS=("." "docs" "src" "tests")
+          # Only tracked files (no .git, no build artifacts)
+          mapfile -t FILES < <(git ls-files | sort)
 
+          tmp=".rd-manifest.json.tmp"
           {
             echo '{'
             echo "  \"repo\": \"${REPO}\","
@@ -35,38 +41,35 @@ jobs:
             echo "  \"branch\": \"${BRANCH}\","
             echo "  \"generated_at\": \"${DATE}\","
             echo '  "files": ['
-          } > .rd-manifest.json.tmp
+          } > "$tmp"
 
-          FIRST=1
-          for DIR in "${INCLUDE_DIRS[@]}"; do
-            [ -d "$DIR" ] || continue
-            while IFS= read -r -d '' FILE; do
-              # Skip directories and the manifest itself
-              [ -d "$FILE" ] && continue
-              [ "$FILE" = ".rd-manifest.json" ] && continue
+          first=1
+          for f in "${FILES[@]}"; do
+            # Skip the manifest itself
+            [ "$f" = ".rd-manifest.json" ] && continue
+            raw_path="$(printf '%s' "$f" | sed 's/ /%20/g; s/#/%23/g')"
+            raw_url="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${raw_path}"
+            sha="$(git ls-files -s -- "$f" | awk '{print $2}')"
+            [ -z "$sha" ] && continue
 
-              RAW_PATH=$(printf '%s' "$FILE" | sed 's/ /%20/g; s/#/%23/g')
-              RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${RAW_PATH}"
-              SHA=$(git ls-files -s -- "$FILE" | awk '{print $2}')
-
-              if [ $FIRST -eq 0 ]; then echo ',' >> .rd-manifest.json.tmp; fi
-              FIRST=0
-              printf '    { "path": "%s", "raw": "%s", "sha": "%s" }' \
-                "$FILE" "$RAW_URL" "$SHA" >> .rd-manifest.json.tmp
-            done < <(find "$DIR" -type f -print0 | sort -z)
+            if [ $first -eq 0 ]; then echo ',' >> "$tmp"; fi
+            first=0
+            printf '    { "path": "%s", "raw": "%s", "sha": "%s" }' \
+              "$f" "$raw_url" "$sha" >> "$tmp"
           done
 
           {
             echo
             echo '  ]'
             echo '}'
-          } >> .rd-manifest.json.tmp
+          } >> "$tmp"
 
-          # Only replace if content changed
-          if [ ! -f .rd-manifest.json ] || ! cmp -s .rd-manifest.json.tmp .rd-manifest.json; then
-            mv .rd-manifest.json.tmp .rd-manifest.json
+          # Write only if changed
+          if [ ! -f .rd-manifest.json ] || ! cmp -s "$tmp" .rd-manifest.json; then
+            mv "$tmp" .rd-manifest.json
           else
-            rm .rd-manifest.json.tmp
+            rm -f "$tmp"
+            echo "Manifest unchanged."
           fi
 
       - name: Commit manifest if changed
@@ -78,5 +81,5 @@ jobs:
             git commit -m "chore: update .rd-manifest.json"
             git push
           else
-            echo "Manifest unchanged."
+            echo "No changes to commit."
           fi
