@@ -1,49 +1,75 @@
 name: Build RumbleDome Manifest to assist AI when processing the repo
+
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - '.rd-manifest.json'   # <- prevent self-trigger
+  workflow_dispatch:          # <- allow manual runs (handy!)
+
 jobs:
   build-manifest:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Generate manifest
+        shell: bash
         run: |
+          set -euo pipefail
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
           COMMIT="${{ github.sha }}"
-          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # Use commit time instead of "now" to reduce spurious diffs
+          DATE="$(git show -s --format=%cI "${COMMIT}")"
+
           INCLUDE_DIRS=("." "docs" "src" "tests")
 
-          echo '{'                                   > .rd-manifest.json
-          echo "  \"repo\": \"${REPO}\","           >> .rd-manifest.json
-          echo "  \"commit\": \"${COMMIT}\","       >> .rd-manifest.json
-          echo "  \"branch\": \"${BRANCH}\","       >> .rd-manifest.json
-          echo "  \"generated_at\": \"${DATE}\","   >> .rd-manifest.json
-          echo '  "files": ['                       >> .rd-manifest.json
+          {
+            echo '{'
+            echo "  \"repo\": \"${REPO}\","
+            echo "  \"commit\": \"${COMMIT}\","
+            echo "  \"branch\": \"${BRANCH}\","
+            echo "  \"generated_at\": \"${DATE}\","
+            echo '  "files": ['
+          } > .rd-manifest.json.tmp
 
           FIRST=1
           for DIR in "${INCLUDE_DIRS[@]}"; do
-            if [ -d "$DIR" ]; then
-              while IFS= read -r -d '' FILE; do
-                [ -d "$FILE" ] && continue
-                RAW_PATH=$(echo "$FILE" | sed 's/ /%20/g; s/#/%23/g')
-                RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${RAW_PATH}"
-                SHA=$(git ls-files -s "$FILE" | awk '{print $2}')
-                if [ $FIRST -eq 0 ]; then echo ',' >> .rd-manifest.json; fi
-                FIRST=0
-                printf '    { "path": "%s", "raw": "%s", "sha": "%s" }' "$FILE" "$RAW_URL" "$SHA" >> .rd-manifest.json
-              done < <(find "$DIR" -type f -print0 | sort -z)
-            fi
+            [ -d "$DIR" ] || continue
+            while IFS= read -r -d '' FILE; do
+              # Skip directories and the manifest itself
+              [ -d "$FILE" ] && continue
+              [ "$FILE" = ".rd-manifest.json" ] && continue
+
+              RAW_PATH=$(printf '%s' "$FILE" | sed 's/ /%20/g; s/#/%23/g')
+              RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${RAW_PATH}"
+              SHA=$(git ls-files -s -- "$FILE" | awk '{print $2}')
+
+              if [ $FIRST -eq 0 ]; then echo ',' >> .rd-manifest.json.tmp; fi
+              FIRST=0
+              printf '    { "path": "%s", "raw": "%s", "sha": "%s" }' \
+                "$FILE" "$RAW_URL" "$SHA" >> .rd-manifest.json.tmp
+            done < <(find "$DIR" -type f -print0 | sort -z)
           done
 
-          echo '' >> .rd-manifest.json
-          echo '  ]' >> .rd-manifest.json
-          echo '}'   >> .rd-manifest.json
+          {
+            echo
+            echo '  ]'
+            echo '}'
+          } >> .rd-manifest.json.tmp
 
-      - name: Commit manifest
+          # Only replace if content changed
+          if [ ! -f .rd-manifest.json ] || ! cmp -s .rd-manifest.json.tmp .rd-manifest.json; then
+            mv .rd-manifest.json.tmp .rd-manifest.json
+          else
+            rm .rd-manifest.json.tmp
+          fi
+
+      - name: Commit manifest if changed
         run: |
           if ! git diff --quiet -- .rd-manifest.json; then
             git config user.name "github-actions[bot]"
