@@ -42,7 +42,7 @@ a Teensy 4.1 MCU, a 4‑port “Mac-style” solenoid, and three pressure sensor
 - **Fault handling:** for initial release, all faults are **hard faults** (boost cut). Display reason.  
   Later: split hard vs soft once fault domain is better understood.
 - **Gen2 Coyote Focus:** initial CAN support assumes Ford Gen2 Coyote; other platforms later via HAL.
-- **UI Gauge Idea:** needle shows actual boost, tick shows current target; background zones: normal / near‑limit (yellow) / overboost (red + flashing).
+- **UI Gauge Idea:** needle shows actual boost, tick around outside of gauge shows current target; background zones: vacuum (black) / normal boost (green) / near‑limit (yellow) / overboost (red + engire background flashing).
 
 ## Self-Learning
 
