@@ -64,6 +64,8 @@ jobs:
             echo '}'
           } >> "$tmp"
 
+          cat "$tmp" | jq .  # pretty-print to validate
+          
           # Write only if changed
           if [ ! -f .rd-manifest.json ] || ! cmp -s "$tmp" .rd-manifest.json; then
             mv "$tmp" .rd-manifest.json
