@@ -65,7 +65,7 @@ jobs:
           } >> "$tmp"
 
           cat "$tmp" | jq .  # pretty-print to validate
-          
+
           # Write only if changed
           if [ ! -f .rd-manifest.json ] || ! cmp -s "$tmp" .rd-manifest.json; then
             mv "$tmp" .rd-manifest.json
@@ -76,12 +76,12 @@ jobs:
 
       - name: Commit manifest if changed
         run: |
-          if ! git diff --quiet -- .rd-manifest.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .rd-manifest.json
-            git commit -m "chore: update .rd-manifest.json"
-            git push
-          else
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .rd-manifest.json
+          if git diff --cached --quiet; then
             echo "No changes to commit."
+          else
+            git commit -m "chore: add/update .rd-manifest.json"
+            git push
           fi
