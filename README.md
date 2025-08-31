@@ -1,11 +1,8 @@
-# RumbleDome: AI-Accelerated Boost Controller
+# RumbleDome: Torque-Based Electronic Boost Controller
 
 Welcome to **Mad Hacks: RumbleDome** — a custom, full-dome electronic boost controller built around the Teensy 4.1 microcontroller and written in Rust.  
 
-This project is an experiment in co-developement by a human architect (me) and an AI assistant (ChatGPT).  
-This README serves two purposes:
-- **For humans**: a high-level overview of the project, goals, and how to navigate the repo.  
-- **For AI**: a “bootloader” that explains where to find specs, interfaces, and manifests to resume work after resets.  
+This project explores innovative electronic boost control through torque-based ECU cooperation and auto-calibration.  
 
 ---
 
@@ -43,79 +40,109 @@ Consider yourself warned.
 ---
 
 ## 🗂 Repo Structure
-- `/src` → Rust firmware modules (code TBD, APIs defined in Interfaces.md).  
+- `/crates` → Rust workspace with modular crates for hardware abstraction, control logic, and testing.  
 - `/docs` → Design documents and specifications.  
   - `Context.md` → High-level design context (narrative + goals).  
-  - `DesignSpec.md` → Detailed design specification.  
-  - `Interfaces.md` → API boundaries and module contracts.  
+  - `Requirements.md` → Functional and performance requirements.
+  - `Architecture.md` → System design and component architecture.
+  - `Safety.md` → Safety requirements and critical constraints.
+  - `Protocols.md` → JSON/CLI communication protocol specifications.
+  - `Hardware.md` → Hardware abstraction layer and platform specifications.
+  - `Implementation.md` → Code structure, build process, and development workflow.
   - `Definitions.md` → Acronyms, jargon, and domain-specific terminology.  
-- `.github/workflows/manifest.yml` → Generates a machine-readable manifest of all repo files, with raw URLs, on checkin to main.  
 
 ---
 
-## 🧭 Bootstrap Instructions (AI + Human)
-If you are **an AI assistant** resuming work:
-1. Load this README.  
-2. Load `docs/Context.md`, `docs/DesignSpec.md`, and `docs/Interfaces.md`.  
-3. Use `.github/workflows/manifest.yml` to resolve the current repo structure and raw file URLs.  
-4. Maintain continuity: never drop requirements listed in the specs.  
-5. Work module-by-module using Interfaces.md as the contract.  
-
-If you are **a human developer**:
+## 🧭 Getting Started
+**For developers**:
 1. Start by reading `docs/Context.md` for the project narrative.  
-2. Review `docs/DesignSpec.md` for detailed architecture and constraints.  
-3. Use `docs/Interfaces.md` to understand how modules interact.  
-4. Build/test steps will be documented in `/docs/Build.md` (TBD).  
+2. Review `docs/Requirements.md` for what the system must do.
+3. Study `docs/Safety.md` for critical safety requirements.
+4. Read `docs/Architecture.md` for system design and component relationships.
+5. Reference `docs/Implementation.md` for build process and development workflow.  
 
 ---
 
-## 🛡 Collaboration Rules
+## 🛡 Development Principles
 - Specs and context docs are the **single source of truth**.  
 - Any new insights → update the docs first, then code.  
 - Code must be **verbose, modular, and testable**.  
-- Failure paths must **always fail safe** (drop to zero boost).  
-- AI will generate files for human review → human commits them to GitHub.  
+- Failure paths must **always fail safe** (drop to zero boost).
 
 ---
 
 ## 🤖 AI Working Agreements
-When assisting with this project, the AI must:
-1. **Anchor to README.md** at the start of every session to regain context.  
-2. **Always check the manifest** for the latest repo structure before assuming file availability.  
-3. **Never drop requirements**: anything listed in Context.md, DesignSpec.md, or Interfaces.md is binding until explicitly removed.  
-4. **Work module-by-module**: respect API contracts, don’t introduce cross-cutting hacks.  
-5. **Document assumptions clearly**: mark speculative areas with `⚠ SPECULATIVE` so the human knows to verify.  
-6. **Preserve clarity and style**: verbose variable names, self-documenting code, proper comments for math/algorithms.  
-7. **Approachability in generated code/docs**: Never assume the reader is an expert in the math, jargon, microcontroller, physics, or theory.
-8. **Fail safe in code paths**: defaults and error states must never result in uncontrolled boost.  
-9. **Keep testability in mind**: unit tests must be able to run with fake data without hardware.  
-10. **Surface gaps**: if required details are missing from the spec, pause and request clarification rather than guessing silently.  
-11. **Respect layering**: HAL abstractions first, hardware-specific logic later.  
+When assisting with this project, AI must:
+1. **Never drop requirements**: anything listed in the spec documents is binding until explicitly removed.  
+2. **Work module-by-module**: respect API contracts, don't introduce cross-cutting hacks.  
+3. **Document assumptions clearly**: mark speculative areas with `⚠ SPECULATIVE` so humans can verify.  
+4. **Preserve clarity and style**: verbose variable names, self-documenting code, proper comments for math/algorithms.  
+5. **Approachability**: Never assume the reader is an expert in the math, jargon, microcontroller, physics, or theory.
+6. **Fail safe in code paths**: defaults and error states must never result in uncontrolled boost.  
+7. **Keep testability in mind**: unit tests must be able to run with fake data without hardware.  
+8. **Surface gaps**: if required details are missing from the spec, pause and request clarification rather than guessing silently.  
+9. **Respect layering**: HAL abstractions first, hardware-specific logic later.
 
 ---
 
-## 🚦 Status
-- [ ] Context defined  
-- [ ] Interfaces defined  
-- [ ] Design spec fleshed out  
-- [ ] Rust firmware scaffolding  
-- [ ] Unit test harness  
-- [ ] HAL abstraction for CAN/sensors  
-- [ ] Self-learning logic  
+## 🚦 Development Status
+
+### Phase 0: Foundation
+- [x] Context defined  
+- [x] Design spec fleshed out  
+- [ ] Interfaces defined (partial - needs CAN reverse engineering)
+
+### Phase 1: Core Infrastructure  
+- [ ] Rust workspace scaffolding (Cargo.toml, crate structure)
+- [ ] HAL trait definitions and mock implementations
+- [ ] Basic unit test framework setup
+- [ ] Core data structures (SystemConfig, LearnedData, etc.)
+- [ ] State machine implementation
+- [ ] Error handling and fault management system
+
+### Phase 2: Hardware Integration
+- [ ] Teensy 4.1 HAL implementation (PWM, ADC, GPIO)
+- [ ] Pressure sensor calibration and reading
+- [ ] CAN bus integration (hardware + protocol)
+- [ ] Display driver (ST7735R TFT)
+- [ ] EEPROM/Flash storage with wear leveling
+- [ ] Watchdog and safety monitoring
+
+### Phase 3: Control Logic
+- [ ] Profile management system
+- [ ] 3-level control loop implementation
+- [ ] PID controller with tuning
+- [ ] Safety override and slew limiting
+- [ ] Environmental compensation algorithms
+- [ ] Real-time system integration (100Hz loop)
+
+### Phase 4: Learning Systems
+- [ ] Auto-calibration state machine
+- [ ] Progressive safety limit expansion
+- [ ] Duty cycle learning and storage
+- [ ] Environmental factor compensation learning
+- [ ] Confidence tracking and validation
+
+### Phase 5: User Interface
+- [ ] JSON protocol implementation
+- [ ] CLI configuration tool
+- [ ] Desktop simulator with test scenarios
+- [ ] Real-time display updates and gauge rendering
+- [ ] Diagnostic and telemetry reporting
+
+### Phase 6: Integration & Testing
+- [ ] Hardware-in-loop testing setup
+- [ ] Safety system validation tests
+- [ ] Performance benchmarking
+- [ ] Vehicle integration testing
+- [ ] Documentation and user guides  
 
 ---
 
-## 👨‍💻 Humans
+## 🔧 Development
 - **Build instructions**: TBD  
 - **Wiring diagrams**: TBD  
-- **Contribution**: Fork, branch, PR.  
-
----
-
-## 🤖 AI
-- Always anchor to this README on reset.  
-- Never assume missing context → fetch from specs.  
-- Output must align with module APIs and coding conventions.  
+- **Contribution**: Fork, branch, PR.
 
 ---
 

@@ -1,28 +1,205 @@
-# RumbleDome Architecture & Working Agreement
+# RumbleDome Architecture
 
-**Purpose:** This document bootstraps any contributor (including future chat GPT) on the project’s intent, structure, iteration rhythm, and non-negotiable rules. If a session resets, read this first.  When executing code generation, always re-read this architecture and all related docs before code gen to make certain latest instructions are being followed.  If contradictions in these instructions are found, flag and request clarification from the architect so that the repo remains consistent and cohesive.
+## System Overview
 
----
+RumbleDome is a torque-aware electronic boost controller that cooperates with modern ECU torque management systems rather than fighting them. The system prioritizes predictable, repeatable boost response to maintain ECU driver demand table validity while providing safety-critical overboost protection.
 
-## 0) TL;DR for Future Me (Cold-Start Checklist)
+## High-Level Architecture
 
-1. Read all documents in /docs/ especially: `/docs/Context.md`, `/docs/DesignSpec.md`, `/docs/ImplementationSpec.md`, `/docs/Interfaces.md`, `/docs/CalibrationAndDefaults.md`, `/docs/MustNotDrop.md`.
-2. Confirm invariants in **MustNotDrop.md** (e.g., *duty=0% ⇒ no-boost*).
-3. Follow the **Iteration Loop** (below) — never “vibe code”.
-4. If anything new becomes critical, **amend the spec first**, then code.
-5. All code changes must have **tests** and must not “drop stitches” from the checklist.
+### Control Philosophy
+**ECU Torque Production Assistant**: RumbleDome monitors ECU torque requests and delivery, then modulates boost to help the ECU achieve its torque targets smoothly and safely. The system works with the ECU's torque management (including all safety system overrides like traction control, ABS, clutch protection) rather than operating independently.
 
----
+**Automatic Safety System Integration**: By responding to the final desired torque (after all ECU safety systems have applied their modifications), RumbleDome automatically cooperates with traction control, ABS, stability control, and other safety systems without requiring specific knowledge of each system.
 
-## 1) Intent (Why this exists)
+### System Components
 
-- Build a **full-dome** EBC that’s **closed-loop**, **self-learning**, and **fail-safe**.
-- Optimize for **driveability** (street, road course) not just drag-strip launch maps.
-- Configuration in **pressure units (PSI/kPa)**, not raw duty.
-- Robust engineering: modular, testable, explainable, readable.
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   ECU (CAN)     │────│  RumbleDome      │────│  Pneumatic      │
+│                 │    │  Controller      │    │  System         │
+│ • Torque Demand │    │                  │    │                 │
+│ • Actual Torque │    │ • Control Logic  │    │ • 4-port MAC    │
+│ • RPM, MAP      │    │ • Safety Monitor │    │   Solenoid      │
+│                 │    │ • Learning Sys   │    │ • Dome Control  │
+└─────────────────┘    │ • Calibration    │    │ • Wastegates    │
+                       └──────────────────┘    └─────────────────┘
+                                │
+                       ┌──────────────────┐
+                       │   User Interface │
+                       │                  │
+                       │ • TFT Display    │
+                       │ • JSON Protocol  │
+                       │ • Calibration UI │
+                       └──────────────────┘
+```
 
----
+## Physical System Architecture
 
-## 2) Project Structure
+### Pneumatic Control System
+- **Air Supply**: Compressed air regulated from ~150 psi to configurable input pressure (typically 10-20 psi)
+- **4-Port MAC Solenoid**: Controls dome pressure distribution
+  - 0% duty → Lower dome pressurized → Wastegate forced OPEN
+  - 100% duty → Upper dome pressurized → Wastegate forced CLOSED
+- **Wastegate Spring**: 5 psi (configurable) provides mechanical failsafe and baseline control authority
+- **Dome Control**: Full-dome system enables boost control both above and below spring pressure
 
-We keep a strict split between **core logic** and **hardware**. Core compiles and runs on desktop (sim) and on MCU (firmware).
+### Sensor Configuration
+1. **Dome Input Pressure**: Monitors air supply pressure for feedforward compensation
+2. **Upper Dome Pressure**: Monitors wastegate actuation effectiveness  
+3. **Manifold Pressure**: Primary safety monitor and boost measurement (post-throttle)
+
+### Control Authority Analysis
+```
+Max Theoretical Boost ≈ Spring Pressure + Input Air Pressure
+Control Resolution ∝ 1 / Input Air Pressure
+Safety Response Time ∝ Input Air Pressure × Dome Volume / Solenoid Flow Rate
+```
+
+## Software Architecture
+
+### Layered Design
+
+**Layer 1: Hardware Abstraction (HAL)**
+- Platform-independent traits for all hardware interfaces
+- Teensy 4.1 implementation for production hardware
+- Mock implementations for desktop testing
+- Future platform support through additional HAL implementations
+
+**Layer 2: Core Control Logic**
+- Zero hardware dependencies - pure business logic
+- All safety-critical algorithms and decision making
+- Learning and adaptation algorithms
+- State management and fault handling
+
+**Layer 3: Protocol & Interface**
+- JSON/CLI protocol definitions and parsing
+- User interface abstractions
+- Configuration management
+- Diagnostic and telemetry interfaces
+
+**Layer 4: Application Integration**
+- Firmware binary for target hardware
+- Desktop simulator for testing and validation
+- Configuration tools and utilities
+
+### Control System Architecture
+
+#### Primary Control Loop (100 Hz) - 3-Level Hierarchy
+
+**Level 1: Torque-Based Boost Target Adjustment**
+1. **Input Processing**: Read CAN torque signals (desired_torque, actual_torque), RPM
+2. **Torque Gap Analysis**: Calculate `torque_error = desired_torque - actual_torque`
+3. **Boost Target Modulation**: Adjust base boost target based on whether ECU is achieving its torque goals
+   - Large torque gap → increase boost target to help ECU
+   - Small/no gap → maintain current boost target  
+   - Approaching torque ceiling → reduce boost target to prevent ECU intervention
+4. **Profile Limit Enforcement**: Clamp boost target to user-configured profile maximums
+
+**Level 2: Precise Boost Delivery (PID + Learned Calibration)**
+5. **Learned Duty Baseline**: Look up base duty cycle from calibration data for current boost target
+6. **Real-time PID Correction**: Apply PID control using `(target_boost - actual_boost)` from manifold pressure
+7. **Environmental Compensation**: Apply learned compensation for temperature, altitude, supply pressure
+
+**Level 3: Safety and Output**
+8. **Safety Override**: Apply overboost protection and pneumatic system constraints
+9. **Slew Rate Limiting**: Prevent rapid duty cycle changes that could cause unsafe response
+10. **PWM Output**: Update solenoid duty cycle
+11. **Learning Refinement**: Update calibration data and environmental compensation factors
+
+#### Auto-Calibration System
+**Progressive Safety Approach**:
+- Phase 1: Ultra-conservative limits (spring + 1 psi)
+- Phase 2: Gradual expansion based on proven safety response
+- Phase 3: Target achievement with full safety validation
+
+**Learning Process**:
+```
+For each (RPM, Boost_Target) pair:
+  1. Start with conservative duty cycle
+  2. Gradually increase duty in small steps
+  3. Monitor boost response and safety metrics
+  4. Record successful duty cycle when target achieved
+  5. Validate with multiple runs for consistency
+  6. Apply environmental compensation factors
+```
+
+#### Safety System Architecture
+
+**Defense in Depth**:
+1. **Electronic Safety**: Software overboost detection and response
+2. **Pneumatic Safety**: 0% duty forces wastegate open via dome pressure
+3. **Mechanical Safety**: Spring provides baseline pressure relief
+
+**Fault Response Hierarchy**:
+- **Critical Faults**: Immediate duty=0%, system halt, display fault
+- **Sensor Faults**: Invalid readings, CAN timeouts, storage errors
+- **Calibration Faults**: Inconsistent learning data, safety response failures
+
+## Data Architecture
+
+### Configuration Data
+- **Boost-Based Profiles**: Boost pressure limits (PSI/kPa) configured by user, not power targets
+- **System Parameters**: Spring pressure, hardware configuration, safety limits
+- **Profile Switching**: Live switching capability with safety validation
+
+#### Profile Strategy - Boost vs Power Independence
+- **Configure in boost pressure**: Profiles define boost pressure curves, never power targets
+- **Engine-agnostic approach**: Same boost pressure produces different power depending on:
+  - Engine tune (timing, fuel, cam timing)
+  - Turbo sizing and efficiency  
+  - Intercooling, exhaust, internal modifications
+  - Environmental conditions (altitude, temperature, fuel quality)
+- **User responsibility**: Determine appropriate boost limits for their specific engine setup
+- **Universal compatibility**: Works with any engine/tune combination within boost pressure constraints
+
+### Learned Data  
+- **Duty Cycle Mappings**: Boost target → required duty cycle relationships
+- **Environmental Compensation**: Temperature, altitude, supply pressure factors
+- **Response Characteristics**: Boost rise rates, system response timing
+- **Calibration Confidence**: Data quality metrics and validation status
+
+### Separation Strategy
+- User configuration and learned data stored separately
+- Learning reset preserves user preferences
+- Configuration changes don't affect learned calibration data
+- Independent backup and restore capabilities
+
+## Performance Architecture
+
+### Real-time Constraints
+- **Control Loop**: 100 Hz minimum execution frequency
+- **Safety Response**: <100ms from overboost detection to wastegate opening
+- **CAN Processing**: Minimal latency message handling
+- **Display Updates**: Smooth gauge animation and status updates
+
+### Memory Management
+- **Static Allocation**: Predictable memory usage for embedded reliability
+- **Wear-Aware Storage**: EEPROM wear leveling for configuration and learned data
+- **Bounded Data Structures**: Fixed-size learning tables and calibration storage
+
+## Extensibility Architecture
+
+### Hardware Platform Support
+- **HAL Abstraction**: Clean interfaces for different MCU platforms
+- **Sensor Flexibility**: Support for different pressure sensor types and ranges
+- **Display Options**: Abstracted display interface for different screen types
+- **CAN Protocol Support**: Vehicle-specific protocol implementations
+
+### Vehicle Platform Support
+- **Ford Gen2 Coyote**: Initial target platform with known CAN signals
+- **Future Platforms**: GM, Mopar, others through CAN protocol HAL implementations
+- **Signal Mapping**: Configurable CAN ID and scaling parameters
+- **Torque Model Variations**: Platform-specific torque interpretation logic
+
+### Feature Evolution
+- **Phase 1 (RumbleDome MVP)**: Core torque-based control, auto-calibration, manual profile selection
+- **Phase 2 ("Beyond RumbleDome")**: Separation of Power Level from Delivery Style
+  - **Power Level (Profile)**: What boost/power you get (user-selected: Valet/Daily/Aggressive/Track)
+  - **Delivery Style (Drive Mode)**: How that power is delivered (Normal/Sport+/Track aggressiveness)
+  - **Safety Benefit**: Drive mode changes don't automatically increase power - prevents accidental power jumps
+
+#### Phase 2 Design Philosophy
+- **Explicit Power Selection**: User must intentionally select power level (profile)
+- **Drive Mode Independence**: Selecting Sport+ or Track mode changes delivery characteristics, not boost limits
+- **Safety Through Separation**: No accidental power increases from drive mode selections
+- **Predictable Power Levels**: Boost targets remain consistent regardless of how aggressively they're delivered
