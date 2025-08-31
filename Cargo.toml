@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "crates/rumbledome-hal",
+    "crates/rumbledome-core", 
+    "crates/rumbledome-protocol",
+    "crates/rumbledome-fw",
+    "crates/rumbledome-sim",
+    "crates/rumbledome-cli"
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["RumbleDome Team"]
+repository = "https://github.com/your-username/rumbledome"
+description = "Torque-based electronic boost controller"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+log = "0.4"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+
+# Embedded dependencies
+embedded-hal = "1.0"
+nb = "1.0"
+
+# Testing dependencies  
+mockall = "0.12"

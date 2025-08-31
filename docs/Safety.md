@@ -146,3 +146,21 @@ RumbleDome employs multiple independent safety layers to prevent engine damage u
 - **ECU Interaction**: Validation that system cooperation does not compromise ECU safety functions
 - **CAN Bus Safety**: Verification that CAN communication failures are handled safely
 - **User Interface Safety**: Confirmation that all user interface operations maintain safety
+
+### SY-24: Storage Health & Data Integrity Safety
+- **Storage Failure Prediction**: Proactive monitoring to prevent unexpected EEPROM failures
+- **Health Thresholds**: Automated warnings at 80% wear, critical alerts at 95% wear
+- **Data Corruption Detection**: Checksum validation and corruption recovery procedures  
+- **Automotive Power Loss**: Immediate write-through persistence to handle abrupt power loss
+- **Learning Rate Limiting**: Prevent excessive write cycles that could prematurely wear storage
+- **Safe Degradation**: System must operate safely even with storage health degradation
+
+**Storage Health Safety Requirements**:
+- **SY-24.1**: System monitors EEPROM wear levels continuously during operation
+- **SY-24.2**: User warnings displayed when any storage region exceeds 80% wear limit
+- **SY-24.3**: Critical alerts and lifespan estimates provided at 95% wear limit
+- **SY-24.4**: All storage writes complete immediately (no deferred writes that could be lost)
+- **SY-24.5**: Learning system limits write frequency to preserve storage lifespan
+- **SY-24.6**: System remains safe and functional even with complete storage failure
+- **SY-24.7**: Storage health data accessible via console/GUI for predictive maintenance
+- **SY-24.8**: Comprehensive wear tracking prevents mystery storage failures

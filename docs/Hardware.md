@@ -57,22 +57,130 @@ trait Analog {
 
 ### Storage (Non-Volatile Memory)
 ```rust
-trait Storage {
-    fn read(key: &str) -> Result<Vec<u8>, StorageError>;
-    fn write(key: &str, data: &[u8]) -> Result<(), StorageError>;
-    fn delete(key: &str) -> Result<(), StorageError>;
-    fn list_keys() -> Result<Vec<String>, StorageError>;
-    fn get_wear_info() -> WearLevelInfo;
+trait NonVolatileStorage {
+    fn read(&mut self, offset: usize, buffer: &mut [u8]) -> Result<usize, HalError>;
+    fn write(&mut self, offset: usize, data: &[u8]) -> Result<(), HalError>;
+    fn erase_all(&mut self) -> Result<(), HalError>;
+    fn sync(&mut self) -> Result<(), HalError>;
+    fn get_size(&self) -> usize;
+    fn get_health_report(&self, current_time: u64) -> StorageHealthReport;
+}
+
+// Comprehensive wear tracking for predictive maintenance
+struct StorageHealthReport {
+    overall_health: StorageHealth,
+    section_health: SectionHealthReport,
+    estimated_lifespan_years: f32,
+    most_worn_region: RegionWearInfo,
+    write_statistics: WriteStatistics,
+    health_summary: String,
+    recommendations: Vec<String>,
 }
 ```
 
-**Storage Requirements**:
-- **Capacity**: 64KB minimum for configuration and learned data
-- **Wear Leveling**: Automatic wear leveling to support >10,000 write cycles
-- **Retention**: 10 years minimum data retention
-- **Write Endurance**: 100,000 write cycles minimum per sector
-- **Atomic Operations**: Write operations must be atomic to prevent corruption
-- **Backup**: Redundant storage recommended for safety-critical data
+**Automotive Storage Requirements**:
+
+**🚗 Power Loss Reality**:
+- **No Graceful Shutdown**: Key-off events cause instant power loss without warning
+- **Immediate Writes**: All write operations must persist immediately (no caching/deferred writes)
+- **Write-Through Strategy**: Every storage write must complete before returning success
+- **No Dependency on Drop/Destructors**: Cannot rely on cleanup routines that won't execute
+
+**📊 Comprehensive Wear Tracking**:
+- **Per-Region Monitoring**: 8 regions of 512 bytes each, individually tracked
+- **Write Cycle Counting**: Track write cycles per region (0-100,000 limit)
+- **Health Status Classification**: Excellent → Good → Warning → Critical → Failed
+- **Predictive Analysis**: Estimate remaining lifespan based on usage patterns
+- **Human-Readable Reporting**: Console and GUI health reports with clear recommendations
+
+**💾 Storage Architecture (Teensy 4.1 FlexRAM EEPROM)**:
+```
+├── Configuration     [   0 -  512] →  512 bytes (system config, profiles)
+├── Learned Data      [ 512 - 2560] → 2048 bytes (calibration maps, environmental factors) 
+├── Calibration       [2560 - 3584] → 1024 bytes (sensor calibration, auto-cal state)
+└── Safety Log        [3584 - 4096] →  512 bytes (fault history, safety events)
+```
+
+**⚠️ Wear Management Strategy**:
+- **Write Rate Limiting**: Learning system must minimize write frequency 
+- **Batch Updates**: Only persist significant changes, not every minor adjustment
+- **Confidence Thresholds**: Only write calibration data above confidence thresholds
+- **Time-Based Persistence**: Maximum write rate limits (e.g., 1 write per minute during learning)
+
+**🔍 Health Monitoring Features**:
+- **Real-Time Tracking**: Write counts, timestamps, average write sizes per region
+- **Proactive Warnings**: Alerts at 80% wear (years before failure)
+- **Critical Notifications**: Urgent alerts at 95% wear with replacement timeline
+- **Usage Pattern Analysis**: Peak write rates, session statistics, uptime correlation
+- **Lifespan Estimation**: Predictive modeling based on current usage patterns
+
+**Technical Specifications**:
+- **Capacity**: 4KB EEPROM emulation via FlexRAM
+- **Write Endurance**: 100,000 cycles per 512-byte region (conservative estimate)
+- **Retention**: 10+ years minimum data retention
+- **Write Speed**: Immediate persistence (no caching delays)
+- **Expected Lifespan**: 15-30 years with normal driving patterns
+- **Failure Prediction**: 2-5 years advance warning before wear-out
+
+### MicroSD Card Storage (Portable Configuration)
+```rust
+trait PortableStorage {
+    fn mount(&mut self) -> Result<(), HalError>;
+    fn unmount(&mut self) -> Result<(), HalError>;
+    fn is_mounted(&self) -> bool;
+    fn read_config_file(&mut self, filename: &str) -> Result<Vec<u8>, HalError>;
+    fn write_config_file(&mut self, filename: &str, data: &[u8]) -> Result<(), HalError>;
+    fn load_user_profiles(&mut self) -> Result<UserProfileSet, HalError>;
+    fn save_user_profiles(&mut self, profiles: &UserProfileSet) -> Result<(), HalError>;
+    fn get_card_info(&self) -> Result<SdCardInfo, HalError>;
+}
+
+// Portable configuration structure
+pub struct UserProfileSet {
+    pub metadata: ProfileSetMetadata,
+    pub profiles: Vec<BoostProfile>,
+    pub sensor_calibrations: SensorCalibrations,
+    pub safety_limits: UserSafetyLimits,
+    pub system_preferences: SystemPreferences,
+}
+```
+
+**MicroSD Storage Architecture**:
+
+**🎯 Two-Tier Storage Strategy**:
+- **EEPROM (Instance-Specific)**: Learned data, auto-calibration progress, storage wear tracking
+- **MicroSD (Portable)**: User profiles, sensor calibrations, safety limits, system preferences
+
+**📁 SD Card File Structure**:
+```
+/RUMBLEDOME/
+├── profiles/
+│   ├── daily_driver.json        # User boost profiles
+│   ├── sport_mode.json
+│   ├── track_day.json
+│   └── valet_mode.json
+├── config/
+│   ├── sensor_calibrations.json # Pressure sensor parameters
+│   ├── safety_limits.json       # User safety boundaries  
+│   └── system_preferences.json  # Display/CAN/UI settings
+├── backups/
+│   ├── 2025-01-15_baseline.bak  # Full system backups
+│   └── 2025-01-20_tuned.bak
+└── firmware/
+    └── updates/                 # Future firmware updates
+```
+
+**Configuration Resolution Priority**:
+1. **SD Card Profiles**: User-defined boost profiles and preferences
+2. **EEPROM Learned Data**: Hardware-specific calibration maps and wear tracking
+3. **Firmware Defaults**: Factory fallbacks if storage unavailable
+
+**Benefits**:
+- **Hardware Independence**: Same SD card works across multiple micros
+- **Rapid Replacement**: Swap SD card to new micro → instant profile access
+- **Version Control**: Text-based JSON files compatible with git
+- **Emergency Backup**: Physical SD card survives micro failures
+- **Development Flexibility**: Easy bulk configuration management
 
 ### CAN Bus Interface
 ```rust
@@ -92,6 +200,71 @@ trait Can {
 - **Protection**: ESD protection and over-voltage protection required
 - **Termination**: Software-configurable 120Ω termination
 - **Error Handling**: Automatic error recovery and fault reporting
+
+### Bluetooth Serial Interface (Wireless Console Access)
+```rust
+trait BluetoothSerial {
+    fn init(&mut self, name: &str, pin: &str) -> Result<(), HalError>;
+    fn is_connected(&self) -> bool;
+    fn send(&mut self, data: &[u8]) -> Result<(), HalError>;
+    fn receive(&mut self) -> Result<Vec<u8>, HalError>;
+    fn get_connection_info(&self) -> Result<BluetoothConnectionInfo, HalError>;
+}
+
+pub struct BluetoothConnectionInfo {
+    pub connected_device: Option<String>,
+    pub signal_strength: i8,
+    pub connection_duration: u32,
+    pub bytes_transferred: u64,
+}
+```
+
+**Bluetooth Architecture**:
+
+**🎯 Wireless Serial Port Abstraction**:
+- **Primary Purpose**: Wireless access to CLI console interface
+- **Protocol**: Standard serial communication over Bluetooth Classic (SPP)
+- **Transparency**: Bluetooth connection identical to USB-C serial connection
+- **Mobile App**: GUI wrapper around existing CLI commands
+
+**📱 Mobile App = Wireless CLI Client**:
+```
+Mobile App                    Teensy 4.1 Console
+    │                             │
+    ├─ GUI Button ──────────────→ │ "rumbledome backup"
+    ├─ Profile Manager ─────────→ │ "rumbledome config --profile sport"  
+    ├─ Live Telemetry ──────────→ │ "rumbledome status --live --format json"
+    └─ Backup/Restore ──────────→ │ "rumbledome restore --backup-file tune.json"
+                                  │
+         Bluetooth SPP            │ Same exact command processing
+         (Wireless Serial)        │ Same exact responses
+                                  │ Same exact SD card access
+```
+
+**Command Translation Examples**:
+| Mobile App Action | CLI Command Sent Over Bluetooth |
+|------------------|----------------------------------|
+| "Download Config" | `rumbledome backup --output mobile_backup.json` |
+| "Upload New Tune" | `rumbledome restore --backup-file uploaded.json` |
+| "Switch to Sport Mode" | `rumbledome config --profile sport` |
+| "View Storage Health" | `rumbledome diagnostics --eeprom-report` |
+| "Live Boost Reading" | `rumbledome status --live --format json` |
+
+**Benefits**:
+- **Single Interface**: CLI commands work identically over USB-C or Bluetooth
+- **No Duplicate Code**: Same command parsing, same functionality
+- **Development Consistency**: Debug with USB-C, deploy with Bluetooth
+- **Robust Fallback**: Bluetooth failure → use USB-C cable
+- **Security**: Standard Bluetooth pairing controls access
+- **Emergency Access**: Physical USB-C always available
+
+**Technical Specifications**:
+- **Protocol**: Bluetooth Classic 2.1+ with SPP (Serial Port Profile)
+- **Range**: 10+ meters typical indoor range
+- **Security**: Bluetooth pairing + optional PIN authentication
+- **Power**: Low power consumption in standby mode
+- **Compatibility**: Standard Bluetooth serial - works with any terminal app
+- **Fallback**: USB-C serial always available for emergency access
 
 ### Display Interface
 ```rust

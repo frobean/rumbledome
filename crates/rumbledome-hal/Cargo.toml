@@ -1,0 +1,24 @@
+[package]
+name = "rumbledome-hal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Hardware abstraction layer for RumbleDome"
+
+[dependencies]
+thiserror.workspace = true
+log.workspace = true
+serde.workspace = true
+
+# Embedded HAL traits
+embedded-hal = { workspace = true, optional = true }
+nb.workspace = true
+
+# Mock implementation dependencies
+mockall = { workspace = true, optional = true }
+
+[features]
+default = ["mock"]
+teensy41 = ["embedded-hal"]
+mock = ["mockall"]

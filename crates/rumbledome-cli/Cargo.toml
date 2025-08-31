@@ -1,0 +1,42 @@
+[package]
+name = "rumbledome-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "rumbledome"
+path = "src/main.rs"
+
+[dependencies]
+# Core RumbleDome crates
+rumbledome-hal = { path = "../rumbledome-hal", features = ["std"] }
+
+# CLI framework
+clap = { version = "4.0", features = ["derive"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Serial communication (for actual EBC communication)
+serialport = { version = "4.2", optional = true }
+
+# Compression (for backup compression feature)
+flate2 = { version = "1.0", optional = true }
+
+# Progress bars for long operations
+indicatif = { version = "0.17", optional = true }
+
+[features]
+default = ["serial", "compression", "progress"]
+serial = ["dep:serialport"]
+compression = ["dep:flate2"]
+progress = ["dep:indicatif"]

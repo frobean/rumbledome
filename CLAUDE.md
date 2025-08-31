@@ -4,90 +4,186 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**RumbleDome** is a custom full-dome electronic boost controller (EBC) for turbo systems, built around the Teensy 4.1 microcontroller and written in Rust. This is a collaborative project between a human architect and AI assistant, focused on creating a safety-first, closed-loop, self-learning boost controller that prioritizes driveability over pure drag-strip performance.
+**RumbleDome** is a torque-based electronic boost controller (EBC) that cooperates with modern ECU torque management systems rather than fighting them. Built around the Teensy 4.1 microcontroller and written in Rust, it prioritizes safety, predictable driveability, and automatic integration with vehicle safety systems over pure drag-strip performance.
+
+**License**: CC BY-NC 4.0 (see LICENSE.md for full terms)
+
+## Core Innovation
+
+**ECU Cooperation Strategy**: Unlike traditional EBCs that operate independently, RumbleDome monitors ECU torque requests and delivery, then modulates boost to help the ECU achieve its torque targets. This automatically integrates with traction control, ABS, clutch protection, and other safety systems without requiring specific knowledge of each system.
 
 ## Key Architecture Principles
 
-- **Safety First**: 0% duty cycle = no boost (failsafe operation)
-- **Modular Design**: Core logic separated from hardware abstraction layers
-- **Self-Learning**: STFT/LTFT-style trims for adaptive control
-- **Rust-Based**: No unsafe code where possible, verbose and testable design
-- **Dual Environment**: Code must run on both desktop (simulation) and MCU (firmware)
+- **Safety First**: 0% duty cycle = wastegate forced open = failsafe to no boost
+- **Torque-Based Control**: Uses ECU torque signals rather than traditional pressure-only control
+- **Boost-Based Configuration**: User configures boost pressure limits, not power targets (engine-agnostic)
+- **Progressive Auto-Calibration**: Conservative safety limits that gradually expand as system proves response capability
+- **Modular Design**: HAL abstraction enables desktop testing and multi-platform support
+- **Predictable Response**: Maintains consistent boost delivery to keep ECU driver demand tables valid
 
-## Workspace Structure (Planned)
+## Workspace Structure (Current)
 
 ```
-rumbledome-hal/   # Hardware abstraction traits + implementations
-rumbledome-core/  # State machine, PI control, learning algorithms, safety logic
-rumbledome-iface/ # JSON/CLI protocol definitions
-rumbledome-fw/    # Teensy 4.1 firmware implementation
-rumbledome-sim/   # Desktop simulator for testing
+crates/
+├── rumbledome-hal/      # Hardware abstraction layer with traits and mock implementation
+├── rumbledome-core/     # Core control logic (hardware-independent)
+├── rumbledome-protocol/ # JSON/CLI protocol definitions  
+├── rumbledome-fw/       # Teensy 4.1 firmware binary (skeleton)
+├── rumbledome-sim/      # Desktop simulator (skeleton)
+└── rumbledome-cli/      # Configuration tool (skeleton)
 ```
 
 ## Critical Safety Requirements (Never Drop)
 
-From `docs/MustNotDrop.md`:
-- 0% PWM duty = full pressure to lower dome = wastegates open = no boost
-- All fault conditions MUST result in 0% duty (boost cut)
-- Default behavior on any error is always fail-safe (no boost)
-- Overboost protection is mandatory and configurable
-- Self-learning trims must be bounded and rate-limited
+- **Failsafe Design**: 0% PWM duty = full pressure to lower dome = wastegates forced open = no boost
+- **Fault Response**: ALL fault conditions MUST result in 0% duty cycle (boost cut)
+- **Safety Overrides**: Overboost protection, progressive limits, bounded learning
+- **High-Authority Recognition**: Small duty cycle changes can produce large boost changes - conservative control required
+
+## 3-Level Control Hierarchy
+
+**Level 1: Torque-Based Boost Target Adjustment**
+- Monitor ECU torque gap (desired vs actual)
+- Modulate boost target to help ECU achieve torque goals
+- Target ~95% of ECU torque ceiling to prevent harsh interventions
+
+**Level 2: Precise Boost Delivery (PID + Learned)**  
+- Use learned duty cycle baseline from auto-calibration
+- Apply PID correction for precise boost delivery
+- Environmental compensation (temperature, altitude, supply pressure)
+
+**Level 3: Safety and Output**
+- Apply safety overrides and progressive limits
+- Slew rate limiting to prevent unsafe responses
+- Update solenoid PWM output
+
+## Phase Roadmap
+
+**Phase 1 (RumbleDome MVP)** ✅ COMPLETE
+- Core torque-based control with auto-calibration
+- Manual profile selection (Valet/Daily/Aggressive/Track) 
+- Hardware abstraction layer and mock implementation
+
+**Phase 2 ("Beyond RumbleDome")** 🚧 PLANNED
+- **Power Level (Profile)**: What boost/power you get (user-selected)
+- **Delivery Style (Drive Mode)**: How that power is delivered (Normal/Sport+/Track aggressiveness)
+- **Safety Benefit**: Drive mode changes don't automatically increase power
 
 ## Key Documentation Files
 
 **ALWAYS read these files before making code changes:**
 
-1. `docs/Context.md` - High-level design context and goals
-2. `docs/Requirements.md` - Functional and performance requirements
+1. `docs/Context.md` - Project narrative and boost-based design philosophy
+2. `docs/Requirements.md` - Functional requirements emphasizing torque-based control  
 3. `docs/Safety.md` - Non-negotiable safety requirements (CRITICAL)
-4. `docs/Architecture.md` - System design and component architecture
-5. `docs/Protocols.md` - JSON/CLI communication protocol specifications
-6. `docs/Hardware.md` - Hardware abstraction layer specifications  
-7. `docs/Implementation.md` - Code structure and development workflow
-
-## Development Workflow
-
-1. **Always anchor to README.md** at session start to regain context
-2. **Check .rd-manifest.json** for latest repository structure (auto-generated)
-3. **Never drop requirements** from specification documents
-4. **Work module-by-module** respecting API boundaries
-5. **Document assumptions** with `⚠ SPECULATIVE` markers
-6. **Preserve code style**: verbose names, extensive comments, self-documenting
-7. **Test everything**: unit tests must work without hardware
-8. **Fail safe**: all error paths must default to zero boost
+4. `docs/Architecture.md` - System design with 3-level control hierarchy
+5. `docs/Implementation.md` - Code structure and build process
+6. `docs/Definitions.md` - Domain terminology and Phase 2 concepts
+7. `docs/Hardware.md` - HAL specifications and sensor requirements
+8. `docs/Protocols.md` - JSON/CLI communication protocol
 
 ## Hardware Context
 
 - **Target MCU**: Teensy 4.1 (Cortex-M7, 600 MHz)
-- **Solenoid**: MAC 4-port valve at ~30 Hz PWM
-- **Sensors**: 3x pressure sensors (0-30 psi, 0.5-4.5V ratiometric)
-- **Display**: ST7735R TFT LCD (128×160)
-- **CAN Bus**: Ford Gen2 Coyote integration via SN65HVD230 transceiver
-- **Control**: Closed-loop PI with torque-awareness from CAN bus
+- **Solenoid**: 4-port MAC valve at 30 Hz PWM
+- **Full-Dome Control**: Both upper and lower dome pressures actively controlled
+- **Sensors**: 3x pressure sensors (dome input, upper dome, manifold pressure)
+- **Display**: ST7735R TFT LCD 1.8" (128×160) in 60mm gauge pod
+- **CAN Bus**: Ford Gen2 Coyote integration (initial target platform)
+- **Air Supply**: Compressed air regulated to optimal input pressure
 
 ## Configuration Philosophy
 
-- All user configuration in **pressure units (PSI/kPa)**, never raw duty cycles
-- Multiple profiles: Valet, Daily, Aggressive, Track, Scramble
-- JSON-based configuration protocol over serial/Bluetooth
-- Self-learning data stored separately from user configuration
-- EEPROM wear-aware storage with batching and thresholds
+**Boost-Based Profiles (Not Power-Based)**:
+- All user configuration in **pressure units (PSI/kPa)**, never raw duty cycles or power targets
+- Same boost pressure produces different power depending on engine tune, turbo sizing, environmental conditions
+- Engine-agnostic approach - works with any engine setup within boost pressure constraints
+- User responsibility to determine appropriate boost limits for their specific engine
+
+**Profile Strategy**:
+- **Valet**: 0-2 PSI (near naturally-aspirated for inexperienced drivers)
+- **Daily**: Conservative boost curve for comfortable daily driving
+- **Aggressive**: Moderate boost curve for spirited driving
+- **Track**: Maximum safe boost curve for experienced drivers/track use
+
+## Current Implementation Status
+
+✅ **Phase 1 Complete**:
+- Workspace scaffolding and crate structure
+- Complete HAL trait definitions with mock implementation
+- Core data structures (SystemConfig, SystemState, error handling)
+- State machine implementation with calibration states
+- JSON protocol message definitions
+- Comprehensive configuration system with 4 default profiles
+- Unit test framework setup
+
+🚧 **Next Priorities**:
+- Teensy 4.1 HAL implementation (Phase 2: Hardware Integration)
+- 3-level control loop implementation (Phase 3: Control Logic)  
+- Auto-calibration algorithms (Phase 4: Learning Systems)
+
+## Development Workflow
+
+1. **Read relevant docs** before making changes to understand context
+2. **Respect safety requirements** - never compromise failsafe behavior
+3. **Work module-by-module** respecting HAL abstractions and API boundaries
+4. **Test everything** - unit tests must work with mock hardware
+5. **Document assumptions** with `⚠ SPECULATIVE` markers for unverified details
+6. **Preserve code style**: verbose names, extensive comments, self-documenting code
+7. **Fail safe**: all error paths must default to zero boost
 
 ## AI Collaboration Rules
 
-- Mark speculative CAN implementation with `⚠ SPECULATIVE` comments
-- Surface specification gaps rather than guessing
-- Respect HAL abstractions - hardware-specific code only in appropriate layers  
-- Maintain testability - core logic must work with mocked hardware
-- Follow Rust best practices but prioritize clarity over cleverness
-- Never assume missing context - ask for clarification when requirements are unclear
+- **Never drop requirements** from specification documents
+- **Surface gaps** rather than guessing when requirements are unclear
+- **Respect layering** - hardware-specific code only in HAL implementations
+- **Maintain testability** - core logic must work with mocked hardware
+- **Follow safety constraints** - overboost protection and progressive limits are non-negotiable
+- **Mark speculative areas** with `⚠ SPECULATIVE` for human verification
+- **Preserve design philosophy** - boost-based configuration, torque cooperation, ECU integration
 
 ## Build Commands
 
-**Note**: No build system is currently implemented. Rust workspace with Cargo will be used once source code development begins.
+**Current Status**: Phase 1 workspace is buildable
 
-Expected commands (TBD):
-- `cargo build` - Build all workspace crates
-- `cargo test` - Run unit tests with mocked hardware
-- `cargo run --bin rumbledome-sim` - Run desktop simulator
-- Embedded build commands TBD based on Teensy 4.1 toolchain setup
+```bash
+# Build all crates
+cargo build --workspace
+
+# Run tests with mock hardware
+cargo test --workspace
+
+# Build specific crates
+cargo build -p rumbledome-core
+cargo build -p rumbledome-hal --features mock
+
+# Check embedded target builds (when ready)
+cargo check --target thumbv7em-none-eabihf -p rumbledome-fw
+```
+
+**Future Commands**:
+```bash
+# Desktop simulator (when implemented)
+cargo run --bin rumbledome-sim
+
+# CLI configuration tool (when implemented)  
+cargo run --bin rumbledome-cli
+
+# Flash firmware to Teensy 4.1 (when implemented)
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/rumbledome-fw.hex
+```
+
+## Critical Implementation Notes
+
+- **CAN Signal Mapping**: Current CAN signal definitions in config are `⚠ SPECULATIVE` - require real vehicle reverse engineering
+- **Sensor Calibration**: Pressure sensor voltage-to-PSI conversion uses estimated curves - verify with actual hardware
+- **PID Tuning**: Default PID parameters in profiles are starting points - require real-world tuning
+- **Safety Limits**: Progressive overboost limits start conservative (spring + 1 PSI) and expand only after proven safety response
+
+## Testing Strategy
+
+- **Mock HAL**: Complete hardware simulation for desktop testing
+- **Unit Tests**: All control logic testable without hardware dependencies
+- **Integration Tests**: Full calibration sequences with simulated sensor data
+- **Safety Tests**: Verify overboost response, fault handling, failsafe behavior
+- **Hardware-in-Loop**: Real hardware validation before vehicle integration
