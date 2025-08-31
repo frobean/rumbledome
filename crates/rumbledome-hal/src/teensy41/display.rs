@@ -6,6 +6,7 @@
 use crate::traits::DisplayController;
 use crate::types::{DisplayMode, GaugeConfig};
 use crate::error::HalError;
+use crate::teensy41::can::{CoyoteEngineData};
 
 use teensy4_bsp::hal;
 use hal::spi::Spi;
@@ -64,6 +65,40 @@ struct GaugeLayout {
     max_value: f32,
     label: &'static str,
     unit: &'static str,
+}
+
+/// System status for display
+#[derive(Debug, Clone)]
+pub struct SystemStatus {
+    pub can_connected: bool,
+    pub learning_confidence: f32,
+    pub active_profile: Option<String>,
+    pub overboost_state: OverboostDisplayState,
+    pub storage_health: f32,
+    pub uptime_seconds: u64,
+}
+
+/// Overboost state for display
+#[derive(Debug, Clone, PartialEq)]
+pub enum OverboostDisplayState {
+    Normal,
+    Warning,
+    Active,
+    Recovery,
+}
+
+/// System diagnostics for troubleshooting display
+#[derive(Debug, Clone)]
+pub struct SystemDiagnostics {
+    pub can_error_rate: f32,
+    pub can_data_age_ms: u64,
+    pub eeprom_health_percentage: f32,
+    pub eeprom_wear_percentage: f32,
+    pub control_loop_time_us: f32,
+    pub boost_error_rms: f32,
+    pub recent_overboost_count: u32,
+    pub sensor_error_flags: u8,
+    pub system_uptime_hours: f32,
 }
 
 impl<SPI> Teensy41Display<SPI>
@@ -256,8 +291,8 @@ where
         layout.start_angle + clamped * (layout.end_angle - layout.start_angle)
     }
     
-    /// Render system status display
-    fn render_status_display(&mut self, rpm: u16, map_kpa: f32, throttle: f32) -> Result<(), HalError> {
+    /// Render system status display with comprehensive engine data
+    fn render_status_display(&mut self, engine_data: &CoyoteEngineData, system_status: &SystemStatus) -> Result<(), HalError> {
         // Clear lower portion
         Rectangle::new(Point::new(0, 100), Size::new(DISPLAY_WIDTH, 60))
             .into_styled(PrimitiveStyle::with_fill(COLOR_BLACK))
@@ -265,24 +300,164 @@ where
             .map_err(|e| HalError::display_error(format!("Clear failed: {:?}", e)))?;
         
         let text_style = MonoTextStyle::new(&FONT_6X10, COLOR_WHITE);
+        let warn_style = MonoTextStyle::new(&FONT_6X10, COLOR_YELLOW);
+        let error_style = MonoTextStyle::new(&FONT_6X10, COLOR_RED);
         
-        // RPM display
-        let rpm_text = format!("RPM: {}", rpm);
-        Text::new(&rpm_text, Point::new(5, 115), text_style)
+        // Left column - Engine data
+        let rpm_color = if engine_data.rpm > 6500 { COLOR_RED } else if engine_data.rpm > 6000 { COLOR_YELLOW } else { COLOR_WHITE };
+        let rpm_style = MonoTextStyle::new(&FONT_6X10, rpm_color);
+        let rpm_text = format!("{:4}rpm", engine_data.rpm);
+        Text::new(&rpm_text, Point::new(5, 115), rpm_style)
             .draw(&mut self.display)
             .map_err(|e| HalError::display_error(format!("RPM text failed: {:?}", e)))?;
         
-        // MAP display
-        let map_text = format!("MAP: {:.1}kPa", map_kpa);
-        Text::new(&map_text, Point::new(5, 130), text_style)
+        // MAP with pressure conversion
+        let map_psi = engine_data.map_kpa * 0.145038; // Convert kPa to PSI
+        let map_text = format!("{:4.1}psi", map_psi);
+        Text::new(&map_text, Point::new(5, 127), text_style)
             .draw(&mut self.display)
             .map_err(|e| HalError::display_error(format!("MAP text failed: {:?}", e)))?;
         
-        // Throttle display
-        let throttle_text = format!("TPS: {:.0}%", throttle);
-        Text::new(&throttle_text, Point::new(5, 145), text_style)
+        // Throttle position
+        if let Some(tps) = engine_data.throttle_position {
+            let tps_text = format!("TPS{:3.0}%", tps);
+            Text::new(&tps_text, Point::new(5, 139), text_style)
+                .draw(&mut self.display)
+                .map_err(|e| HalError::display_error(format!("TPS text failed: {:?}", e)))?;
+        }
+        
+        // Right column - System status
+        let mut y_pos = 115;
+        
+        // CAN status
+        let can_style = if system_status.can_connected { text_style } else { error_style };
+        let can_text = if system_status.can_connected { "CAN:OK" } else { "CAN:ERR" };
+        Text::new(can_text, Point::new(70, y_pos), can_style)
             .draw(&mut self.display)
-            .map_err(|e| HalError::display_error(format!("Throttle text failed: {:?}", e)))?;
+            .map_err(|e| HalError::display_error(format!("CAN status failed: {:?}", e)))?;
+        y_pos += 12;
+        
+        // Learning status
+        let learn_style = match system_status.learning_confidence {
+            conf if conf > 0.8 => text_style,
+            conf if conf > 0.5 => warn_style, 
+            _ => error_style,
+        };
+        let learn_text = format!("L:{:3.0}%", system_status.learning_confidence * 100.0);
+        Text::new(&learn_text, Point::new(70, y_pos), learn_style)
+            .draw(&mut self.display)
+            .map_err(|e| HalError::display_error(format!("Learning status failed: {:?}", e)))?;
+        y_pos += 12;
+        
+        // Active profile indicator
+        if let Some(ref profile_name) = system_status.active_profile {
+            let profile_short = match profile_name.as_str() {
+                "Daily Driver" => "DAILY",
+                "Sport Mode" => "SPORT", 
+                "Track Day" => "TRACK",
+                "Valet Mode" => "VALET",
+                _ => "CUSTM",
+            };
+            Text::new(profile_short, Point::new(70, y_pos), text_style)
+                .draw(&mut self.display)
+                .map_err(|e| HalError::display_error(format!("Profile text failed: {:?}", e)))?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Render diagnostic display mode
+    fn render_diagnostic_display(&mut self, diagnostics: &SystemDiagnostics) -> Result<(), HalError> {
+        // Clear display
+        self.clear()?;
+        
+        let text_style = MonoTextStyle::new(&FONT_6X10, COLOR_WHITE);
+        let warn_style = MonoTextStyle::new(&FONT_6X10, COLOR_YELLOW);
+        let error_style = MonoTextStyle::new(&FONT_6X10, COLOR_RED);
+        
+        // Title
+        Text::new("DIAGNOSTICS", Point::new(25, 15), MonoTextStyle::new(&FONT_8X13, COLOR_BLUE))
+            .draw(&mut self.display)
+            .map_err(|e| HalError::display_error(format!("Title failed: {:?}", e)))?;
+        
+        let mut y_pos = 30;
+        
+        // CAN bus diagnostics
+        Text::new("CAN Bus:", Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let can_style = if diagnostics.can_error_rate < 0.01 { text_style } else { error_style };
+        let can_text = format!("Err:{:.3}% Age:{:3}ms", 
+            diagnostics.can_error_rate * 100.0, diagnostics.can_data_age_ms);
+        Text::new(&can_text, Point::new(10, y_pos), can_style)
+            .draw(&mut self.display)?;
+        y_pos += 15;
+        
+        // EEPROM health
+        Text::new("EEPROM:", Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let eeprom_style = if diagnostics.eeprom_health_percentage > 90.0 { 
+            text_style 
+        } else if diagnostics.eeprom_health_percentage > 70.0 { 
+            warn_style 
+        } else { 
+            error_style 
+        };
+        let eeprom_text = format!("Health:{:.0}% Wear:{:.1}%", 
+            diagnostics.eeprom_health_percentage, diagnostics.eeprom_wear_percentage);
+        Text::new(&eeprom_text, Point::new(10, y_pos), eeprom_style)
+            .draw(&mut self.display)?;
+        y_pos += 15;
+        
+        // Control loop performance
+        Text::new("Control:", Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let loop_text = format!("Loop:{:.0}us Err:{:.2}", 
+            diagnostics.control_loop_time_us, diagnostics.boost_error_rms);
+        Text::new(&loop_text, Point::new(10, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        // Recent events
+        if diagnostics.recent_overboost_count > 0 {
+            let event_text = format!("Overboost:{} events", diagnostics.recent_overboost_count);
+            Text::new(&event_text, Point::new(10, y_pos), warn_style)
+                .draw(&mut self.display)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Render overboost warning display
+    pub fn show_overboost_warning(&mut self, peak_psi: f32, limit_psi: f32) -> Result<(), HalError> {
+        // Flash red border
+        Rectangle::new(Point::new(0, 0), Size::new(DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            .into_styled(PrimitiveStyle::with_stroke(COLOR_RED, 4))
+            .draw(&mut self.display)
+            .map_err(|e| HalError::display_error(format!("Warning border failed: {:?}", e)))?;
+        
+        // Warning text
+        let title_style = MonoTextStyle::new(&FONT_8X13, COLOR_RED);
+        Text::new("OVERBOOST!", Point::new(20, 30), title_style)
+            .draw(&mut self.display)
+            .map_err(|e| HalError::display_error(format!("Warning title failed: {:?}", e)))?;
+        
+        let details_style = MonoTextStyle::new(&FONT_6X10, COLOR_WHITE);
+        let peak_text = format!("Peak: {:.1} PSI", peak_psi);
+        Text::new(&peak_text, Point::new(20, 50), details_style)
+            .draw(&mut self.display)?;
+        
+        let limit_text = format!("Limit: {:.1} PSI", limit_psi);
+        Text::new(&limit_text, Point::new(20, 65), details_style)
+            .draw(&mut self.display)?;
+        
+        Text::new("SYSTEM RECOVERY", Point::new(15, 90), details_style)
+            .draw(&mut self.display)?;
         
         Ok(())
     }
@@ -360,8 +535,19 @@ where
         Ok(())
     }
     
-    fn show_status(&mut self, rpm: u16, map_kpa: f32, throttle: f32) -> Result<(), HalError> {
-        self.render_status_display(rpm, map_kpa, throttle)?;
+    fn show_status(&mut self, engine_data: &CoyoteEngineData, system_status: &SystemStatus) -> Result<(), HalError> {
+        match self.mode {
+            DisplayMode::Gauges => {
+                self.render_status_display(engine_data, system_status)?;
+            },
+            DisplayMode::Status => {
+                self.render_full_status_display(engine_data, system_status)?;
+            },
+            DisplayMode::Diagnostics => {
+                // Diagnostics mode requires separate call to show_diagnostics
+                return Ok(());
+            }
+        }
         
         // Show active status message if present
         if self.has_active_status() {
@@ -376,7 +562,81 @@ where
             }
         }
         
+        // Handle overboost warning overlay
+        if system_status.overboost_state == OverboostDisplayState::Active {
+            self.show_overboost_warning(25.0, 22.0)?; // TODO: Get actual values
+        }
+        
         Ok(())
+    }
+    
+    /// Show full status display (when in status mode)
+    fn render_full_status_display(&mut self, engine_data: &CoyoteEngineData, system_status: &SystemStatus) -> Result<(), HalError> {
+        // Clear display
+        self.clear()?;
+        
+        let text_style = MonoTextStyle::new(&FONT_6X10, COLOR_WHITE);
+        let title_style = MonoTextStyle::new(&FONT_8X13, COLOR_BLUE);
+        
+        // Title
+        Text::new("SYSTEM STATUS", Point::new(15, 15), title_style)
+            .draw(&mut self.display)?;
+        
+        let mut y_pos = 30;
+        
+        // Engine data section
+        let rpm_text = format!("RPM:     {:4}", engine_data.rpm);
+        Text::new(&rpm_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let map_psi = engine_data.map_kpa * 0.145038;
+        let map_text = format!("MAP:     {:4.1} PSI", map_psi);
+        Text::new(&map_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let torque_text = format!("Desired: {:4.0} Nm", engine_data.desired_torque);
+        Text::new(&torque_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let actual_text = format!("Actual:  {:4.0} Nm", engine_data.actual_torque);
+        Text::new(&actual_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 15;
+        
+        // System status section
+        let can_status = if system_status.can_connected { "CONNECTED" } else { "DISCONNECTED" };
+        let can_color = if system_status.can_connected { COLOR_GREEN } else { COLOR_RED };
+        let can_text = format!("CAN: {}", can_status);
+        Text::new(&can_text, Point::new(5, y_pos), MonoTextStyle::new(&FONT_6X10, can_color))
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        let learn_text = format!("Learning: {:3.0}%", system_status.learning_confidence * 100.0);
+        Text::new(&learn_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        y_pos += 12;
+        
+        if let Some(ref profile) = system_status.active_profile {
+            let profile_text = format!("Profile: {}", profile);
+            Text::new(&profile_text, Point::new(5, y_pos), text_style)
+                .draw(&mut self.display)?;
+        }
+        y_pos += 12;
+        
+        let uptime_hours = system_status.uptime_seconds as f32 / 3600.0;
+        let uptime_text = format!("Uptime:  {:5.1}h", uptime_hours);
+        Text::new(&uptime_text, Point::new(5, y_pos), text_style)
+            .draw(&mut self.display)?;
+        
+        Ok(())
+    }
+    
+    /// Show diagnostic information
+    pub fn show_diagnostics(&mut self, diagnostics: &SystemDiagnostics) -> Result<(), HalError> {
+        self.render_diagnostic_display(diagnostics)
     }
     
     fn show_error(&mut self, error_message: &str) -> Result<(), HalError> {

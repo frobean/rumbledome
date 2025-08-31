@@ -1,18 +1,59 @@
 # RumbleDome Implementation Guide
 
+## Recent Implementation Progress
+
+### ✅ PWM Synchronization System (Jan 2025)
+Implemented comprehensive PWM-synchronized control loop timing to prevent phase noise in dome pressure control:
+
+- **PWM frequency increased**: 30Hz → 100Hz for better solenoid response
+- **Multiple sync strategies**: CycleStart, CycleMidpoint, SubCycle timing options
+- **Jitter reduction**: Deadband filtering using FlexPWM resolution (0.003% duty cycle)
+- **Beat frequency detection**: Prevents harmonics between control and PWM frequencies
+- **PWM-aware slew limiting**: Coordinated output changes during synchronized updates
+
+### ✅ EEPROM/NVM Storage Implementation (Jan 2025)
+Completed non-volatile storage HAL from placeholder to full implementation:
+
+- **4KB FlexRAM EEPROM**: Using i.MX RT1062 hardware emulation
+- **Immediate writes**: Automotive-grade persistence (no graceful shutdown dependency)
+- **Comprehensive wear tracking**: 8-region monitoring with health status
+- **Storage sections**: Config (512B), Learned Data (2KB), Calibration (1KB), Safety Log (512B)
+- **Complete test suite**: Storage operations, wear tracking, section management
+
+### ✅ Voltage Divider Support (Jan 2025)
+Updated sensor calibration for 5V pressure sensors with 3.3V ADC input:
+
+- **10kΩ+20kΩ resistor configuration**: 0.333 voltage ratio for faster ADC reads
+- **Voltage scaling**: 0.5V-4.5V → 0.167V-1.5V (optimized divider ratio)
+- **Updated scale factor**: 22.56 PSI/V (30 PSI ÷ 1.33V span)
+- **Resolution**: 0.018 PSI with 12-bit ADC (more than adequate for boost control)
+- **Formula**: `PSI = ((Vout - 0.167) / 1.33) * 30`
+- **Documentation updated**: Context.md, TestPlan.md, all calibration defaults
+
+### ✅ MAP Sensor Fusion & Cross-Calibration (Jan 2025)
+Implemented intelligent sensor fusion for full vacuum-to-boost manifold pressure range:
+- **Dual sensor approach**: CAN MAP (vacuum, 0-1 bar) + boost gauge (positive, 0-30 PSI)
+- **Automatic cross-calibration**: Learns systematic offset between sensors in overlap zone
+- **Dynamic compensation**: 1% learning rate with exponential moving average
+- **Seamless operation**: No faults for sensor disagreement - system adapts continuously
+- **Persistent learning**: Cross-calibration stored in EEPROM with environmental factors
+- **Transition zone blending**: Weighted sensor fusion around atmospheric pressure
+- **Atmospheric compensation**: Automatic baseline tracking for altitude/weather changes
+
 ## Workspace Structure
 
 ```
 rumbledome/
 ├── Cargo.toml                 # Workspace root configuration
 ├── crates/
-│   ├── rumbledome-hal/        # Hardware abstraction layer
-│   ├── rumbledome-core/       # Core control logic (no hardware deps)
-│   ├── rumbledome-protocol/   # JSON/CLI protocol definitions
-│   ├── rumbledome-fw/         # Teensy 4.1 firmware binary
-│   ├── rumbledome-sim/        # Desktop simulator and test scenarios
-│   └── rumbledome-cli/        # Configuration tool
-└── docs/                      # Project documentation
+│   ├── rumbledome-hal/        # Hardware abstraction layer ✅
+│   ├── rumbledome-core/       # Core control logic (no hardware deps) ✅
+│   ├── rumbledome-protocol/   # JSON/CLI protocol definitions ✅
+│   ├── rumbledome-fw/         # Teensy 4.1 firmware binary ⚠️
+│   ├── rumbledome-sim/        # Desktop simulator and test scenarios ❌
+│   └── rumbledome-cli/        # Configuration tool ❌
+├── tests/                     # Integration tests ✅
+└── docs/                      # Project documentation ✅
 ```
 
 ## Crate Dependencies
@@ -492,13 +533,17 @@ impl NonVolatileStorage for Teensy41Storage {
         
         // AUTOMOTIVE REALITY: Write immediately to EEPROM (no deferred writes)
         // Power loss (key-off) can happen at any time without warning
-        let eeprom_base = 0x1401C000u32 as *mut u8;
+        #[cfg(target_arch = "arm")]
         unsafe {
+            let eeprom_base = 0x1401C000u32 as *mut u8;
             core::ptr::copy_nonoverlapping(data.as_ptr(), eeprom_base.add(offset), write_len);
         }
         
         // Update comprehensive wear tracking
-        self.update_wear_tracking(offset, write_len, current_time);
+        let region = self.get_region_index(offset);
+        if region < self.write_counters.len() {
+            self.write_counters[region] += 1;
+        }
         
         Ok(())
     }

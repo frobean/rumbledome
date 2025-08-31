@@ -386,11 +386,11 @@ impl Default for SystemConfig {
             
             hardware: HardwareConfig {
                 pwm_frequency: 30,
-                adc_vref: 5.0,
+                adc_vref: 3.3,      // Teensy 4.1 ADC reference
                 adc_resolution: 12,
                 pressure_sensors: PressureSensorConfig {
-                    zero_pressure_voltage: 0.5,
-                    full_scale_voltage: 4.5,
+                    zero_pressure_voltage: 0.167, // 0.5V * 0.333 (10kΩ+20kΩ divider)
+                    full_scale_voltage: 1.5,      // 4.5V * 0.333 (10kΩ+20kΩ divider)
                     full_scale_pressure: 30.0,
                 },
                 display: DisplayConfig {

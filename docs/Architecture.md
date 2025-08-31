@@ -9,6 +9,8 @@ RumbleDome is a torque-aware electronic boost controller that cooperates with mo
 ### Control Philosophy
 **ECU Torque Production Assistant**: RumbleDome monitors ECU torque requests and delivery, then modulates boost to help the ECU achieve its torque targets smoothly and safely. The system works with the ECU's torque management (including all safety system overrides like traction control, ABS, clutch protection) rather than operating independently.
 
+**PWM-Synchronized Control**: Advanced timing coordination prevents phase noise and jitter in pneumatic control through beat frequency elimination and cycle-synchronized updates. Control loop timing aligns with 100Hz PWM cycles for optimal solenoid response.
+
 **Automatic Safety System Integration**: By responding to the final desired torque (after all ECU safety systems have applied their modifications), RumbleDome automatically cooperates with traction control, ABS, stability control, and other safety systems without requiring specific knowledge of each system.
 
 ### System Components
@@ -81,6 +83,44 @@ Safety Response Time ∝ Input Air Pressure × Dome Volume / Solenoid Flow Rate
 - Firmware binary for target hardware
 - Desktop simulator for testing and validation
 - Configuration tools and utilities
+
+## PWM Synchronization Architecture
+
+### Timing Coordination System
+RumbleDome implements advanced PWM-synchronized control timing to eliminate phase noise and jitter in pneumatic control:
+
+```rust
+pub enum ControlUpdateStrategy {
+    Asynchronous,           // Standard async timing
+    CycleStart,            // Update at PWM cycle start
+    CycleMidpoint,         // Update at cycle midpoint (optimal)
+    SubCycle { updates_per_cycle: u8 }, // Multiple updates per cycle
+}
+```
+
+**Key Benefits**:
+- **Beat Frequency Prevention**: Control updates coordinate with 100Hz PWM cycles
+- **Jitter Reduction**: Deadband filtering using 0.003% FlexPWM resolution  
+- **Phase Noise Elimination**: Synchronized updates prevent control/PWM interference
+- **Timing Windows**: ±10% update windows around optimal cycle points
+
+### PWM Timing Integration
+```rust
+// Control loop validates PWM timing before updates
+fn execute_control_cycle(&mut self, pwm_timing: &PwmTimingInfo) -> Result<(), CoreError> {
+    // Check for optimal update window
+    if !pwm_timing.is_optimal_update_time(current_time_us) {
+        let wait_time = pwm_timing.time_to_next_update_window_us(current_time_us);
+        if wait_time < MAX_ACCEPTABLE_DELAY_US {
+            // Wait for optimal timing window
+            delay_us(wait_time);
+        }
+    }
+    
+    // Execute synchronized control update
+    self.apply_duty_cycle_synchronized(duty_cycle, current_time_us)?;
+}
+```
 
 ### Control System Architecture
 

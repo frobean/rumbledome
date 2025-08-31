@@ -86,14 +86,23 @@ pub struct EnvironmentalFactors {
     /// Altitude compensation (duty cycle adjustment per 1000ft)
     pub altitude_compensation: f32,
     
+    /// Sensor cross-calibration offset (learned difference between MAP sensors)
+    pub map_sensor_cross_calibration: f32,
+    
     /// Dome supply pressure baseline (PSI)
     pub supply_pressure_baseline: f32,
     
     /// Supply pressure compensation (duty cycle adjustment per PSI deviation)
     pub supply_pressure_compensation: f32,
     
+    /// Atmospheric pressure baseline (PSI absolute)
+    pub atmospheric_pressure_baseline: f32,
+    
     /// Learning confidence for environmental factors
     pub environmental_confidence: f32,
+    
+    /// MAP sensor cross-calibration offset (learned difference)
+    pub map_sensor_cross_calibration: f32,
 }
 
 /// Confidence and quality metrics
@@ -173,8 +182,18 @@ impl LearnedData {
         
         compensated_duty += supply_compensation;
         
-        // TODO: Temperature and altitude compensation (requires additional sensors)
-        // For now, these are placeholders for future implementation
+        // Atmospheric pressure compensation (altitude effects)
+        let current_atmospheric = sensors.manifold_pressure_gauge + 14.7; // Convert gauge to absolute
+        let atmospheric_error = current_atmospheric - 
+            self.environmental_factors.atmospheric_pressure_baseline;
+        
+        // Lower atmospheric pressure (higher altitude) requires more duty cycle
+        // Rule of thumb: 3% loss per 1000ft altitude, ~1 PSI per 2000ft
+        let atmospheric_compensation = atmospheric_error * -2.0; // -2% duty per PSI atmospheric drop
+        compensated_duty += atmospheric_compensation;
+        
+        // TODO: Temperature compensation (requires additional sensors)
+        // For now, this is a placeholder for future implementation
         
         Ok(compensated_duty)
     }
@@ -406,8 +425,10 @@ impl Default for LearnedData {
             environmental_factors: EnvironmentalFactors {
                 temperature_compensation: 0.0,
                 altitude_compensation: 0.0,
+                map_sensor_cross_calibration: 0.0, // Learned offset between MAP sensors
                 supply_pressure_baseline: 15.0, // PSI
                 supply_pressure_compensation: 1.0, // 1% duty per PSI
+                atmospheric_pressure_baseline: 14.7, // PSI absolute at sea level
                 environmental_confidence: 0.0,
             },
             confidence_metrics: ConfidenceMetrics {

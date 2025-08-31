@@ -48,8 +48,10 @@ trait Analog {
 ```
 
 **Pressure Sensor Requirements**:
-- **Input Voltage Range**: 0.5V - 4.5V (ratiometric to 5V supply)
-- **Resolution**: 12-bit minimum (4096 steps across range)
+- **Sensor Output**: 0.5V - 4.5V (ratiometric to 5V supply)
+- **Teensy Input Range**: 0.33V - 2.97V (after 5V→3.3V voltage divider)
+- **Voltage Divider**: Precision resistors, 3.3V/5V = 0.66 ratio
+- **Resolution**: 12-bit minimum (4096 steps across 2.64V span)
 - **Accuracy**: ±1% full scale
 - **Sample Rate**: 1000 Hz minimum per channel
 - **Input Impedance**: >10MΩ to avoid sensor loading
@@ -404,12 +406,32 @@ Status LED:               Pin 13 (GPIO)
 
 ## Sensor Specifications
 
-### Pressure Sensors (0-30 PSI)
-- **Output**: 0.5V-4.5V ratiometric to 5V supply
-- **Accuracy**: ±0.25% full scale
-- **Response Time**: <1ms
+### Manifold Pressure Sensor Strategy
+
+**Dual-Sensor Approach for Full Vacuum→Boost Range**:
+
+**CAN MAP Sensor (OEM)**:
+- **Range**: 0-1 bar absolute (vacuum only: -14.7 to 0 PSI gauge)
+- **Optimal**: Deep vacuum conditions (idle, deceleration)
+- **Data Source**: CAN bus from ECU
+- **Resolution**: Varies by ECU (typically 0.1-0.2 PSI)
+
+**Added Boost Gauge Sensor**:
+- **Range**: 0-30 PSI gauge (boost measurement)
+- **Sensor Output**: 0.5V-4.5V ratiometric to 5V supply
+- **Teensy ADC Input**: 0.167V-1.5V (10kΩ+20kΩ voltage divider, 0.333 ratio)
+- **Scaling Formula**: `PSI = ((Vout - 0.167) / 1.33) * 30`
+- **Optimal**: Boost conditions (positive manifold pressure)
+- **Resolution**: 0.018 PSI with 12-bit ADC
 - **Thread**: 1/8" NPT male
-- **Electrical**: 3-wire configuration (Power, Ground, Signal)
+
+**Sensor Fusion Logic**:
+- **Deep vacuum** (-5 PSI to -1 PSI): CAN MAP sensor primary
+- **Transition zone** (±1 PSI around atmospheric): Blended reading
+- **Boost range** (+1 PSI to +30 PSI): Boost gauge sensor primary
+- **Cross-calibration learning**: Automatically learns offset between sensors in overlap zone
+- **Dynamic offset compensation**: Continuously adjusts for systematic sensor differences
+- **Seamless operation**: No faults for sensor disagreement - system adapts and learns
 - **Temperature Compensation**: Built-in compensation recommended
 
 **Scaling Formula**:

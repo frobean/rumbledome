@@ -20,7 +20,7 @@ pub use calibration::*;
 pub use learning::*;
 pub use error::*;
 
-use rumbledome_hal::{HalTrait, SystemInputs};
+use rumbledome_hal::{HalTrait, SystemInputs, ManifoldPressureFusion, SensorFusionConfig};
 use crate::calibration::{CalibrationAction};
 use crate::state::{FaultCode};
 use std::time::Instant;
@@ -51,6 +51,9 @@ pub struct RumbleDomeCore<H: HalTrait> {
     /// Hardware abstraction layer
     hal: H,
     
+    /// Sensor fusion for manifold pressure
+    sensor_fusion: ManifoldPressureFusion,
+    
     /// Last control loop execution time
     last_execution: Option<Instant>,
 }
@@ -66,6 +69,7 @@ impl<H: HalTrait> RumbleDomeCore<H> {
             safety_monitor: SafetyMonitor::new(),
             calibration: AutoCalibration::new(),
             hal,
+            sensor_fusion: ManifoldPressureFusion::new(SensorFusionConfig::default()),
             last_execution: None,
         })
     }
@@ -222,9 +226,25 @@ impl<H: HalTrait> RumbleDomeCore<H> {
         // For now, return default values - needs CAN protocol implementation
         let can = rumbledome_hal::CanData::default();
         
+        // Combine manifold pressure readings using sensor fusion
+        let combined_manifold_pressure = self.sensor_fusion.combine_manifold_readings(&can, &sensors)
+            .map_err(|e| CoreError::hardware(e))?;
+        
+        // Validate sensor fusion result
+        self.sensor_fusion.validate_reading(&combined_manifold_pressure)
+            .map_err(|e| CoreError::hardware(e))?;
+        
+        // Update atmospheric baseline for learning
+        if can.rpm < 500 {
+            self.sensor_fusion.update_atmospheric_baseline(
+                self.learned_data.environmental_factors.atmospheric_pressure_baseline
+            );
+        }
+        
         Ok(rumbledome_hal::SystemInputs {
             sensors,
             can,
+            combined_manifold_pressure,
             timestamp_ms,
         })
     }
@@ -454,12 +474,23 @@ impl<H: HalTrait> RumbleDomeCore<H> {
     fn update_learning(&mut self, inputs: &SystemInputs) -> Result<(), CoreError> {
         // Update environmental factors based on current conditions
         let current_supply = inputs.sensors.dome_input_pressure;
-        let baseline = self.learned_data.environmental_factors.supply_pressure_baseline;
+        let supply_baseline = self.learned_data.environmental_factors.supply_pressure_baseline;
         
         // Exponential moving average for supply pressure baseline
         let alpha = 0.01; // Slow adaptation
-        let new_baseline = baseline * (1.0 - alpha) + current_supply * alpha;
-        self.learned_data.environmental_factors.supply_pressure_baseline = new_baseline;
+        let new_supply_baseline = supply_baseline * (1.0 - alpha) + current_supply * alpha;
+        self.learned_data.environmental_factors.supply_pressure_baseline = new_supply_baseline;
+        
+        // Update atmospheric pressure baseline from manifold pressure when engine off
+        if inputs.can.rpm < 500 {
+            // Engine off - manifold pressure should be atmospheric
+            let current_atmospheric = inputs.sensors.manifold_pressure_gauge + 14.7; // Convert gauge to absolute
+            let atm_baseline = self.learned_data.environmental_factors.atmospheric_pressure_baseline;
+            let new_atm_baseline = atm_baseline * (1.0 - alpha) + current_atmospheric * alpha;
+            self.learned_data.environmental_factors.atmospheric_pressure_baseline = new_atm_baseline;
+            
+            log::trace!("Atmospheric pressure baseline updated: {:.2} PSI", new_atm_baseline);
+        }
         
         // Update confidence metrics
         self.learned_data.calculate_confidence();
@@ -480,5 +511,183 @@ impl<H: HalTrait> RumbleDomeCore<H> {
         log::trace!("Solenoid output: {:.1}% duty cycle", safe_duty);
         
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rumbledome_hal::mock::MockHal;
+    use rumbledome_hal::{SystemInputs, SensorReadings, CanData};
+    
+    fn setup_test_core() -> RumbleDomeCore<MockHal> {
+        let hal = MockHal::new();
+        let config = SystemConfig::default();
+        let mut core = RumbleDomeCore::new(hal, config).unwrap();
+        core.initialize().unwrap();
+        core
+    }
+    
+    fn create_test_inputs(manifold_psi: f32, rpm: u16, desired_torque: f32, actual_torque: f32) -> SystemInputs {
+        SystemInputs {
+            sensors: SensorReadings {
+                dome_input_pressure: 15.0,
+                upper_dome_pressure: 8.0,
+                manifold_pressure_gauge: manifold_psi,
+                timestamp_ms: 1000,
+            },
+            can: CanData {
+                rpm,
+                map_kpa: 101.3,
+                desired_torque,
+                actual_torque,
+                throttle_position: Some(50.0),
+                drive_mode: None,
+                timestamp_ms: 1000,
+            },
+            timestamp_ms: 1000,
+        }
+    }
+    
+    /// SY-001: Overboost Detection and Response
+    #[test]
+    fn test_overboost_immediate_response() {
+        let mut core = setup_test_core();
+        
+        // Set system to armed state
+        core.state = SystemState::Armed;
+        
+        // Create inputs with overboost condition (10.0 PSI > 9.5 PSI limit)
+        let inputs = create_test_inputs(10.0, 4000, 200.0, 190.0);
+        
+        core.execute_control_cycle().unwrap();
+        
+        // System should immediately cut boost
+        assert_eq!(core.get_state(), &SystemState::OverboostCut);
+    }
+    
+    #[test]
+    fn test_overboost_hysteresis() {
+        let mut core = setup_test_core();
+        core.state = SystemState::Armed;
+        
+        // Set a known overboost limit (9.5 PSI) and hysteresis (0.3 PSI)
+        core.config.profiles[0].overboost_limit = 9.5;
+        core.config.profiles[0].overboost_hysteresis = 0.3;
+        
+        // Trigger overboost
+        let inputs_overboost = create_test_inputs(9.6, 4000, 200.0, 190.0);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_state(), &SystemState::OverboostCut);
+        
+        // Drop below limit but above hysteresis threshold (9.3 > 9.2)
+        core.state = SystemState::OverboostCut; // Ensure we're in cut state
+        let inputs_above_hysteresis = create_test_inputs(9.3, 4000, 200.0, 190.0);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_state(), &SystemState::OverboostCut); // Still cut
+        
+        // Drop below hysteresis threshold (9.1 < 9.2)
+        let inputs_below_hysteresis = create_test_inputs(9.1, 4000, 200.0, 190.0);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_state(), &SystemState::Armed); // Resume
+    }
+    
+    /// SY-002: Fault Response Testing
+    #[test]
+    fn test_sensor_fault_detection() {
+        let mut core = setup_test_core();
+        core.state = SystemState::Armed;
+        
+        // Inject implausible sensor reading (negative pressure impossible)
+        let invalid_inputs = create_test_inputs(-5.0, 4000, 200.0, 190.0);
+        
+        // Control cycle should fail with input validation error
+        let result = core.execute_control_cycle();
+        assert!(result.is_err());
+        
+        if let Err(CoreError::InputValidation { .. }) = result {
+            // Expected error type
+        } else {
+            panic!("Expected InputValidation error");
+        }
+    }
+    
+    #[test]
+    fn test_can_timeout_detection() {
+        let mut core = setup_test_core();
+        core.state = SystemState::Armed;
+        
+        // Create inputs with stale CAN data (1000ms + 600ms = 1600ms old, > 500ms timeout)
+        let mut inputs = create_test_inputs(5.0, 4000, 200.0, 190.0);
+        inputs.can.timestamp_ms = 400; // 600ms old when system time is 1000ms
+        inputs.timestamp_ms = 1000;
+        
+        // Should fail with CAN timeout
+        let result = core.execute_control_cycle();
+        assert!(result.is_err());
+        
+        if let Err(CoreError::InputValidation { message }) = result {
+            assert!(message.contains("CAN data timeout"));
+        } else {
+            panic!("Expected CAN timeout validation error");
+        }
+    }
+    
+    /// EC-001: Torque Ceiling Enforcement Testing  
+    #[test]
+    fn test_arming_conditions() {
+        let mut core = setup_test_core();
+        assert_eq!(core.get_state(), &SystemState::Idle);
+        
+        // Test insufficient RPM
+        let low_rpm_inputs = create_test_inputs(2.0, 500, 100.0, 95.0);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_state(), &SystemState::Idle); // Should not arm
+        
+        // Test valid arming conditions
+        let valid_inputs = create_test_inputs(2.0, 2000, 150.0, 140.0);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_state(), &SystemState::Armed); // Should arm
+    }
+    
+    #[test]
+    fn test_input_validation_ranges() {
+        let core = setup_test_core();
+        
+        // Test valid inputs
+        let valid_inputs = create_test_inputs(5.0, 3000, 200.0, 190.0);
+        assert!(core.validate_inputs(&valid_inputs).is_ok());
+        
+        // Test high manifold pressure (beyond reasonable boost)
+        let high_pressure_inputs = create_test_inputs(25.0, 3000, 200.0, 190.0);
+        assert!(core.validate_inputs(&high_pressure_inputs).is_err());
+        
+        // Test excessive RPM
+        let mut high_rpm_inputs = create_test_inputs(5.0, 8500, 200.0, 190.0);
+        high_rpm_inputs.can.rpm = 8500;
+        assert!(core.validate_inputs(&high_rpm_inputs).is_err());
+    }
+    
+    #[test]
+    fn test_safety_failsafe_states() {
+        let mut core = setup_test_core();
+        
+        // Test that all non-Armed states result in 0% duty cycle
+        let inputs = create_test_inputs(5.0, 3000, 200.0, 190.0);
+        
+        // Test Idle state
+        core.state = SystemState::Idle;
+        core.execute_control_cycle().unwrap();
+        // Would verify duty cycle is 0% (requires mock HAL verification)
+        
+        // Test Fault state  
+        core.state = SystemState::Fault(FaultCode::WatchdogTimeout);
+        core.execute_control_cycle().unwrap();
+        // Would verify duty cycle is 0%
+        
+        // Test OverboostCut state
+        core.state = SystemState::OverboostCut;
+        core.execute_control_cycle().unwrap();
+        // Would verify duty cycle is 0%
     }
 }

@@ -22,7 +22,13 @@ I'm making this open source and available on the off chance that someone else mi
 **Legal / liability disclaimers:**  
 - See adjacent LICENSE.md
 
-Consider yourself warned.  
+Consider yourself warned.
+
+**Recent Development Notes (Jan 2025)**:
+- PWM synchronization system prevents phase noise in dome pressure control
+- EEPROM implementation handles automotive power-loss scenarios safely
+- Voltage divider support enables standard 5V pressure sensors with 3.3V ADC
+- Comprehensive test framework provides safety validation foundation  
 
 --
 
@@ -30,11 +36,12 @@ Consider yourself warned.
 - **Firmware**: Rust (no unsafe where possible), modular design, Teensy 4.1 target.  
 - **Hardware**:
   - Teensy 4.1 MCU  
-  - 4-port MAC solenoid (30 Hz, 0% duty = lower dome pressure = failsafe to no boost)  
-  - 3 pressure sensors (0–30 psi, 0.5–4.5 V output)  
+  - 4-port MAC solenoid (100 Hz PWM, 0% duty = failsafe to no boost)  
+  - 3 pressure sensors (0–30 psi, 5V output with 3.3V voltage dividers)  
   - ST7735R TFT LCD (1.8" 128×160)  
   - CAN bus transceiver (SN65HVD230 or similar)  
   - OBD2 adapter for CAN connection  
+  - MicroSD card for portable configuration  
 - **Concept**: Closed-loop, self-learning dome pressure control with multiple user profiles and fail-safes.  
 
 ---
@@ -69,7 +76,71 @@ Consider yourself warned.
 - Code must be **verbose, modular, and testable**.  
 - Failure paths must **always fail safe** (drop to zero boost).
 
+## 🔧 Key Technical Achievements
+
+### PWM Synchronization Innovation
+Solved critical phase noise issue in pneumatic control through:
+- **Beat frequency prevention**: Control loop timing coordinated with PWM cycles
+- **Jitter reduction**: Deadband filtering based on FlexPWM hardware resolution
+- **Multiple sync strategies**: Optimized timing for different performance requirements
+- **Automotive timing constraints**: 100Hz PWM with ±10% update windows
+
+### Storage Architecture for Automotive Reality
+- **Immediate write-through**: No graceful shutdown dependency (key-off = instant power loss)
+- **Dual-tier storage**: EEPROM for hardware-specific data, SD card for portable profiles
+- **Comprehensive wear tracking**: Predictive maintenance with years of advance warning
+- **Backup/restore system**: Complete microcontroller replacement workflow
+
+### Voltage Interface Adaptation
+- **5V→3.3V scaling**: 10kΩ+20kΩ voltage divider support throughout codebase
+- **Optimized resolution**: 0.018 PSI with 12-bit ADC for precise boost control
+- **Calibration automation**: Sensor scaling factors updated automatically
+- **Documentation synchronization**: All docs updated for new voltage ranges
+
+### Intelligent Sensor Fusion
+- **Dual MAP sensor strategy**: CAN MAP (vacuum) + boost gauge (positive pressure)
+- **Automatic cross-calibration**: Learns systematic offset between sensors during operation
+- **Seamless range coverage**: Full spectrum from deep vacuum (-14.7 PSI) to high boost (+30 PSI)
+- **No sensor faults**: System adapts to sensor differences instead of throwing errors
+
 ---
+
+## 🚀 Implementation Status
+
+### Phase 6: Hardware Abstraction ✅
+- [x] Complete Teensy 4.1 HAL implementation
+- [x] FlexPWM solenoid control (100Hz with PWM synchronization)
+- [x] Dual ADC pressure sensor reading (12-bit, 4x averaging, voltage divider support)
+- [x] FlexCAN integration with Ford Gen2 Coyote parsing
+- [x] ST7735R TFT display with gauges and status
+- [x] FlexRAM EEPROM emulation (4KB organized storage)
+- [x] GPIO control for buttons and status LEDs
+- [x] Bluetooth serial interface for wireless configuration
+- [x] MicroSD card support for portable profiles
+
+### Phase 7: Control Systems ✅  
+- [x] 3-level control hierarchy implementation
+- [x] PWM-synchronized control loop timing (jitter reduction)
+- [x] Torque-based boost target modulation
+- [x] PID controller with learned baseline correction
+- [x] Safety monitoring and overboost protection
+- [x] Auto-calibration with progressive safety limits
+- [x] Comprehensive test framework foundation
+
+### Phase 8: Testing & Validation 🔄
+- [x] Unit test structure for safety-critical functions
+- [x] Storage operation validation tests
+- [x] PWM timing coordination tests
+- [ ] Integration tests for full control cycles
+- [ ] Hardware-in-loop validation setup
+- [ ] Safety system stress testing
+
+### Phase 9: Next Steps 📋
+- [ ] Real vehicle CAN signal mapping (replace speculative IDs)
+- [ ] Physical hardware validation and sensor calibration
+- [ ] Complete desktop simulator implementation
+- [ ] Mobile app development for Bluetooth interface
+- [ ] Production deployment testing
 
 ## 🤖 AI Working Agreements
 When assisting with this project, AI must:

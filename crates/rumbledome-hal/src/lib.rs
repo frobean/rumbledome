@@ -8,6 +8,7 @@
 pub mod traits;
 pub mod types;
 pub mod error;
+pub mod sensor_fusion;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -18,6 +19,7 @@ pub mod teensy41;
 pub use traits::*;
 pub use types::*;
 pub use error::*;
+pub use sensor_fusion::*;
 
 #[cfg(feature = "mock")]
 pub use mock::MockHal;

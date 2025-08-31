@@ -2,25 +2,9 @@
 //! 
 //! Provides EEPROM emulation using the i.MX RT1062 FlexRAM 
 //! for configuration and learned data persistence.
-//!
-//! ## Automotive Reality: Immediate Writes
-//! 
-//! Unlike desktop applications, automotive ECUs experience abrupt power loss
-//! when the key is turned off - no graceful shutdown sequence. Therefore:
-//! 
-//! - **All writes are immediate** to ensure persistence
-//! - **No deferred/cached writes** that could be lost on power loss
-//! - **Learning system must minimize write frequency** to preserve EEPROM lifespan
-//! - **Write cycle tracking** for wear leveling awareness
-//!
-//! The learning system should batch updates and only persist significant changes
-//! rather than writing every minor calibration adjustment.
 
 use crate::traits::NonVolatileStorage;
 use crate::error::HalError;
-
-use teensy4_bsp::hal;
-use hal::ral::{flexram, FLEXRAM};
 
 /// EEPROM size in bytes (4KB for Teensy 4.1)
 const EEPROM_SIZE: usize = 4096;
@@ -44,123 +28,20 @@ const SAFETY_LOG_SIZE: usize = 512;
 /// EEPROM wear limit per region (conservative estimate)
 const EEPROM_WEAR_LIMIT: u32 = 100_000;
 
-/// Wear warning threshold (80% of limit)
-const WEAR_WARNING_THRESHOLD: u32 = (EEPROM_WEAR_LIMIT as f32 * 0.8) as u32;
-
-/// Wear critical threshold (95% of limit) 
-const WEAR_CRITICAL_THRESHOLD: u32 = (EEPROM_WEAR_LIMIT as f32 * 0.95) as u32;
-
-/// Comprehensive wear tracking and health monitoring
-#[derive(Debug, Clone)]
-pub struct WearTrackingData {
-    /// Write cycle counters per region
-    pub region_write_counts: [u32; 8],
-    
-    /// Total bytes written since initialization
-    pub total_bytes_written: u64,
-    
-    /// Total write operations since initialization
-    pub total_write_operations: u32,
-    
-    /// First write timestamp per region (0 = never written)
-    pub first_write_timestamps: [u64; 8],
-    
-    /// Last write timestamp per region  
-    pub last_write_timestamps: [u64; 8],
-    
-    /// Running average write size per region
-    pub average_write_sizes: [f32; 8],
-    
-    /// Peak write rate (writes per minute) observed
-    pub peak_write_rate: f32,
-    
-    /// Current session write count
-    pub session_write_count: u32,
-    
-    /// Health status per region
-    pub region_health: [StorageHealth; 8],
-}
-
 /// Storage region health status
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StorageHealth {
-    /// Excellent condition (< 50% of wear limit)
     Excellent,
-    /// Good condition (50-79% of wear limit)  
     Good,
-    /// Warning condition (80-94% of wear limit)
     Warning,
-    /// Critical condition (95-99% of wear limit)
     Critical,
-    /// Failed or near failure (≥ wear limit)
     Failed,
-}
-
-/// Human-readable storage health report
-#[derive(Debug, Clone)]
-pub struct StorageHealthReport {
-    /// Overall system health status
-    pub overall_health: StorageHealth,
-    
-    /// Health per storage section
-    pub section_health: SectionHealthReport,
-    
-    /// Total estimated lifespan remaining (years)
-    pub estimated_lifespan_years: f32,
-    
-    /// Most worn region information
-    pub most_worn_region: RegionWearInfo,
-    
-    /// Write activity statistics
-    pub write_statistics: WriteStatistics,
-    
-    /// Human-readable health summary
-    pub health_summary: String,
-    
-    /// Recommended actions
-    pub recommendations: Vec<String>,
-}
-
-/// Health report per storage section
-#[derive(Debug, Clone)]
-pub struct SectionHealthReport {
-    pub config_health: StorageHealth,
-    pub learned_data_health: StorageHealth, 
-    pub calibration_health: StorageHealth,
-    pub safety_log_health: StorageHealth,
-}
-
-/// Most worn region details
-#[derive(Debug, Clone)]
-pub struct RegionWearInfo {
-    pub region_id: usize,
-    pub section_name: &'static str,
-    pub write_count: u32,
-    pub wear_percentage: f32,
-    pub estimated_cycles_remaining: u32,
-}
-
-/// Write activity statistics
-#[derive(Debug, Clone)]
-pub struct WriteStatistics {
-    pub total_writes_lifetime: u32,
-    pub session_writes: u32,
-    pub average_writes_per_hour: f32,
-    pub peak_write_rate_per_minute: f32,
-    pub total_data_written_kb: f32,
-    pub uptime_hours: f32,
 }
 
 /// Teensy 4.1 non-volatile storage implementation
 pub struct Teensy41Storage {
-    /// FlexRAM instance configured for EEPROM emulation
-    flexram: FLEXRAM,
-    
     /// EEPROM buffer for caching
     eeprom_cache: [u8; EEPROM_SIZE],
-    
-    /// Comprehensive wear tracking data
-    wear_tracking: WearTrackingData,
     
     /// Write cycle counters for wear leveling awareness
     write_counters: [u32; 8],
@@ -172,23 +53,10 @@ pub struct Teensy41Storage {
 impl Teensy41Storage {
     /// Create new storage controller
     pub fn new() -> Result<Self, HalError> {
-        
-        // Access FlexRAM peripheral
-        let flexram = unsafe { FLEXRAM::instance() };
-        
-        // Configure FlexRAM for EEPROM emulation
-        // Bank 7 (4KB) configured as EEPROM
-        flexram.gpr_ctrl.modify(|_, w| {
-            w.flexram_bank_cfg_sel().bit(true) // Use FlexRAM_BANK_CFG
-        });
-        
-        // Set bank 7 as EEPROM (0b10)
-        flexram.flexram_bank_cfg.modify(|_, w| unsafe {
-            w.flexram_bank_cfg().bits(0x55555550) // All DTCM except bank 7 (EEPROM)
-        });
-        
         // Initialize EEPROM cache by reading current contents
         let mut eeprom_cache = [0u8; EEPROM_SIZE];
+        
+        #[cfg(target_arch = "arm")]
         unsafe {
             let eeprom_base = 0x1401C000u32 as *const u8; // EEPROM base address
             core::ptr::copy_nonoverlapping(
@@ -203,59 +71,15 @@ impl Teensy41Storage {
             CONFIG_SIZE, LEARNED_DATA_SIZE, CALIBRATION_SIZE, SAFETY_LOG_SIZE);
         
         Ok(Self {
-            flexram,
             eeprom_cache,
-            wear_tracking: WearTrackingData::new(),
             write_counters: [0; 8],
-            init_timestamp: 0, // TODO: Get actual timestamp from time provider
+            init_timestamp: 0,
         })
     }
     
     /// Get region index for address
     fn get_region_index(&self, offset: usize) -> usize {
         offset / 512 // 512 bytes per region
-    }
-    
-    /// Mark region as dirty for deferred write
-    fn mark_dirty(&mut self, offset: usize, len: usize) {
-        let start_region = self.get_region_index(offset);
-        let end_region = self.get_region_index(offset + len - 1);
-        
-        for region in start_region..=end_region {
-            if region < self.dirty_regions.len() {
-                self.dirty_regions[region] = true;
-            }
-        }
-    }
-    
-    /// Flush dirty regions to EEPROM
-    fn flush_dirty_regions(&mut self) -> Result<(), HalError> {
-        let eeprom_base = 0x1401C000u32 as *mut u8;
-        
-        for (region_idx, &dirty) in self.dirty_regions.iter().enumerate() {
-            if dirty {
-                let region_offset = region_idx * 512;
-                let region_size = core::cmp::min(512, EEPROM_SIZE - region_offset);
-                
-                // Copy region from cache to EEPROM
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        self.eeprom_cache.as_ptr().add(region_offset),
-                        eeprom_base.add(region_offset),
-                        region_size
-                    );
-                }
-                
-                // Update counters and clear dirty flag
-                self.write_counters[region_idx] += 1;
-                self.dirty_regions[region_idx] = false;
-                
-                log::trace!("Flushed EEPROM region {} ({} bytes, {} writes)",
-                    region_idx, region_size, self.write_counters[region_idx]);
-            }
-        }
-        
-        Ok(())
     }
     
     /// Validate storage layout and detect corruption
@@ -288,45 +112,6 @@ impl Teensy41Storage {
         checksum
     }
     
-    /// Update comprehensive wear tracking data
-    fn update_wear_tracking(&mut self, offset: usize, write_len: usize, timestamp: u64) {
-        let start_region = self.get_region_index(offset);
-        let end_region = self.get_region_index(offset + write_len - 1);
-        
-        for region in start_region..=end_region {
-            if region < 8 {
-                // Update write count
-                self.wear_tracking.region_write_counts[region] += 1;
-                
-                // Track first write timestamp
-                if self.wear_tracking.first_write_timestamps[region] == 0 {
-                    self.wear_tracking.first_write_timestamps[region] = timestamp;
-                }
-                
-                // Update last write timestamp
-                self.wear_tracking.last_write_timestamps[region] = timestamp;
-                
-                // Update running average write size
-                let current_avg = self.wear_tracking.average_write_sizes[region];
-                let count = self.wear_tracking.region_write_counts[region] as f32;
-                self.wear_tracking.average_write_sizes[region] = 
-                    (current_avg * (count - 1.0) + write_len as f32) / count;
-                
-                // Update health status
-                self.wear_tracking.region_health[region] = Self::calculate_health_status(
-                    self.wear_tracking.region_write_counts[region]
-                );
-            }
-        }
-        
-        // Update global statistics
-        self.wear_tracking.total_bytes_written += write_len as u64;
-        self.wear_tracking.total_write_operations += 1;
-        self.wear_tracking.session_write_count += 1;
-        
-        // TODO: Update peak write rate tracking
-    }
-    
     /// Calculate health status based on write count
     fn calculate_health_status(write_count: u32) -> StorageHealth {
         let wear_percentage = (write_count as f32 / EEPROM_WEAR_LIMIT as f32) * 100.0;
@@ -340,259 +125,42 @@ impl Teensy41Storage {
         }
     }
     
-    /// Generate comprehensive human-readable health report
-    pub fn get_health_report(&self, current_time: u64) -> StorageHealthReport {
-        let uptime_hours = (current_time.saturating_sub(self.init_timestamp)) as f32 / 3600000.0; // ms to hours
-        
-        // Find most worn region
-        let (most_worn_idx, most_worn_count) = self.wear_tracking.region_write_counts
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, &count)| count)
-            .map(|(idx, &count)| (idx, count))
-            .unwrap_or((0, 0));
-        
-        let most_worn_region = RegionWearInfo {
-            region_id: most_worn_idx,
-            section_name: Self::get_section_name_for_region(most_worn_idx),
-            write_count: most_worn_count,
-            wear_percentage: (most_worn_count as f32 / EEPROM_WEAR_LIMIT as f32) * 100.0,
-            estimated_cycles_remaining: EEPROM_WEAR_LIMIT.saturating_sub(most_worn_count),
-        };
-        
-        // Calculate overall health (worst region determines overall status)
-        let overall_health = self.wear_tracking.region_health
-            .iter()
-            .min()
-            .copied()
-            .unwrap_or(StorageHealth::Excellent);
-        
-        // Calculate estimated lifespan
-        let current_rate = if uptime_hours > 0.0 {
-            most_worn_count as f32 / uptime_hours
-        } else { 0.0 };
-        
-        let estimated_lifespan_years = if current_rate > 0.0 {
-            let remaining_cycles = most_worn_region.estimated_cycles_remaining as f32;
-            let hours_remaining = remaining_cycles / current_rate;
-            hours_remaining / (24.0 * 365.25) // Convert to years
-        } else { f32::INFINITY };
-        
-        // Generate health summary and recommendations
-        let (health_summary, recommendations) = self.generate_health_summary_and_recommendations(&overall_health, &most_worn_region);
-        
-        StorageHealthReport {
-            overall_health,
-            section_health: self.get_section_health(),
-            estimated_lifespan_years,
-            most_worn_region,
-            write_statistics: WriteStatistics {
-                total_writes_lifetime: self.wear_tracking.total_write_operations,
-                session_writes: self.wear_tracking.session_write_count,
-                average_writes_per_hour: if uptime_hours > 0.0 { 
-                    self.wear_tracking.total_write_operations as f32 / uptime_hours 
-                } else { 0.0 },
-                peak_write_rate_per_minute: self.wear_tracking.peak_write_rate,
-                total_data_written_kb: self.wear_tracking.total_bytes_written as f32 / 1024.0,
-                uptime_hours,
-            },
-            health_summary,
-            recommendations,
-        }
+    /// Get current wear statistics
+    pub fn get_wear_stats(&self) -> [u32; 8] {
+        self.write_counters
     }
     
-    /// Get health status for each storage section
-    fn get_section_health(&self) -> SectionHealthReport {
-        SectionHealthReport {
-            config_health: self.wear_tracking.region_health[0], // Config in region 0
-            learned_data_health: self.get_worst_health_in_range(1, 4), // Learned data spans regions 1-4
-            calibration_health: self.get_worst_health_in_range(5, 6), // Calibration in regions 5-6
-            safety_log_health: self.wear_tracking.region_health[7], // Safety log in region 7
-        }
-    }
-    
-    /// Get worst health status in a range of regions
-    fn get_worst_health_in_range(&self, start: usize, end: usize) -> StorageHealth {
-        (start..=end)
-            .filter_map(|i| self.wear_tracking.region_health.get(i))
-            .min()
-            .copied()
-            .unwrap_or(StorageHealth::Excellent)
-    }
-    
-    /// Get human-readable section name for region
-    fn get_section_name_for_region(region: usize) -> &'static str {
-        match region {
-            0 => "Configuration",
-            1..=4 => "Learned Data",
-            5..=6 => "Calibration",
-            7 => "Safety Log",
-            _ => "Unknown",
-        }
-    }
-    
-    /// Generate human-readable health summary and recommendations
-    fn generate_health_summary_and_recommendations(&self, overall_health: &StorageHealth, most_worn: &RegionWearInfo) -> (String, Vec<String>) {
-        let summary = match overall_health {
-            StorageHealth::Excellent => {
-                format!("Storage is in excellent condition. Most worn section '{}' at {:.1}% wear. Expected lifespan: many decades.", 
-                    most_worn.section_name, most_worn.wear_percentage)
-            },
-            StorageHealth::Good => {
-                format!("Storage is in good condition. Most worn section '{}' at {:.1}% wear. No immediate concerns.", 
-                    most_worn.section_name, most_worn.wear_percentage)
-            },
-            StorageHealth::Warning => {
-                format!("⚠️ Storage showing wear. Section '{}' at {:.1}% wear ({} cycles remaining). Monitor usage patterns.", 
-                    most_worn.section_name, most_worn.wear_percentage, most_worn.estimated_cycles_remaining)
-            },
-            StorageHealth::Critical => {
-                format!("🚨 CRITICAL: Storage heavily worn! Section '{}' at {:.1}% wear ({} cycles remaining). Plan replacement soon.", 
-                    most_worn.section_name, most_worn.wear_percentage, most_worn.estimated_cycles_remaining)
-            },
-            StorageHealth::Failed => {
-                format!("❌ STORAGE FAILURE: Section '{}' has exceeded wear limit! Replace ECU immediately.", 
-                    most_worn.section_name)
-            },
-        };
-        
-        let mut recommendations = Vec::new();
-        
-        match overall_health {
-            StorageHealth::Excellent | StorageHealth::Good => {
-                recommendations.push("Continue normal operation. No action needed.".to_string());
-            },
-            StorageHealth::Warning => {
-                recommendations.push("Monitor storage health more frequently.".to_string());
-                recommendations.push("Consider reducing learning aggressiveness to extend lifespan.".to_string());
-                recommendations.push("Plan for ECU replacement within next 2-3 years.".to_string());
-            },
-            StorageHealth::Critical => {
-                recommendations.push("⚠️ Plan ECU replacement within 6-12 months.".to_string());
-                recommendations.push("Reduce learning rate to preserve remaining cycles.".to_string());
-                recommendations.push("Backup configuration and learned data.".to_string());
-                recommendations.push("Monitor for data corruption or write failures.".to_string());
-            },
-            StorageHealth::Failed => {
-                recommendations.push("🚨 REPLACE ECU IMMEDIATELY!".to_string());
-                recommendations.push("Storage failure may cause data loss or unpredictable behavior.".to_string());
-                recommendations.push("Do not rely on learning or configuration persistence.".to_string());
-            },
-        }
-        
-        (summary, recommendations)
-    }
-    
-    /// Format health report for human-readable console output
-    pub fn format_health_report_for_console(&self, current_time: u64) -> String {
-        let report = self.get_health_report(current_time);
-        
-        let mut output = String::new();
-        
-        output.push_str("═══════════════════════════════════════════════════════════════════════\n");
-        output.push_str("                         EEPROM HEALTH REPORT\n");
-        output.push_str("═══════════════════════════════════════════════════════════════════════\n\n");
-        
-        // Overall status with emoji
-        let status_emoji = match report.overall_health {
-            StorageHealth::Excellent => "✅",
-            StorageHealth::Good => "🟢", 
-            StorageHealth::Warning => "⚠️",
-            StorageHealth::Critical => "🚨",
-            StorageHealth::Failed => "❌",
-        };
-        
-        output.push_str(&format!("{} OVERALL STATUS: {:?}\n", status_emoji, report.overall_health));
-        output.push_str(&format!("📊 {}\n\n", report.health_summary));
-        
-        // Storage section health
-        output.push_str("STORAGE SECTION HEALTH:\n");
-        output.push_str(&format!("  📋 Configuration:  {:?}\n", report.section_health.config_health));
-        output.push_str(&format!("  🧠 Learned Data:   {:?}\n", report.section_health.learned_data_health));
-        output.push_str(&format!("  🎛️  Calibration:   {:?}\n", report.section_health.calibration_health));
-        output.push_str(&format!("  🛡️  Safety Log:    {:?}\n\n", report.section_health.safety_log_health));
-        
-        // Most worn region details
-        output.push_str("MOST WORN REGION:\n");
-        output.push_str(&format!("  📍 Section: {} (Region {})\n", 
-            report.most_worn_region.section_name, report.most_worn_region.region_id));
-        output.push_str(&format!("  📈 Wear: {:.1}% ({} of {} cycles used)\n", 
-            report.most_worn_region.wear_percentage, 
-            report.most_worn_region.write_count,
-            EEPROM_WEAR_LIMIT));
-        output.push_str(&format!("  ⏳ Remaining: {} cycles\n\n", 
-            report.most_worn_region.estimated_cycles_remaining));
-        
-        // Write statistics
-        output.push_str("WRITE ACTIVITY STATISTICS:\n");
-        output.push_str(&format!("  📝 Total Writes (Lifetime): {}\n", report.write_statistics.total_writes_lifetime));
-        output.push_str(&format!("  🔄 Session Writes: {}\n", report.write_statistics.session_writes));
-        output.push_str(&format!("  📊 Average Writes/Hour: {:.1}\n", report.write_statistics.average_writes_per_hour));
-        output.push_str(&format!("  🏃 Peak Rate: {:.1} writes/minute\n", report.write_statistics.peak_write_rate_per_minute));
-        output.push_str(&format!("  💾 Total Data Written: {:.1} KB\n", report.write_statistics.total_data_written_kb));
-        output.push_str(&format!("  ⏰ Uptime: {:.1} hours\n\n", report.write_statistics.uptime_hours));
-        
-        // Lifespan estimate
-        if report.estimated_lifespan_years.is_infinite() {
-            output.push_str("⏳ ESTIMATED LIFESPAN: Indefinite (no wear detected yet)\n\n");
-        } else if report.estimated_lifespan_years > 100.0 {
-            output.push_str("⏳ ESTIMATED LIFESPAN: >100 years (excellent condition)\n\n");
-        } else {
-            output.push_str(&format!("⏳ ESTIMATED LIFESPAN: {:.1} years at current usage rate\n\n", report.estimated_lifespan_years));
-        }
-        
-        // Recommendations
-        if !report.recommendations.is_empty() {
-            output.push_str("RECOMMENDATIONS:\n");
-            for (i, rec) in report.recommendations.iter().enumerate() {
-                output.push_str(&format!("  {}. {}\n", i + 1, rec));
-            }
-            output.push_str("\n");
-        }
-        
-        output.push_str("═══════════════════════════════════════════════════════════════════════\n");
-        
-        output
-    }
-}
-
-impl WearTrackingData {
-    /// Create new wear tracking data structure
-    fn new() -> Self {
-        Self {
-            region_write_counts: [0; 8],
-            total_bytes_written: 0,
-            total_write_operations: 0,
-            first_write_timestamps: [0; 8],
-            last_write_timestamps: [0; 8],
-            average_write_sizes: [0.0; 8],
-            peak_write_rate: 0.0,
-            session_write_count: 0,
-            region_health: [StorageHealth::Excellent; 8],
-        }
+    /// Get overall storage health
+    pub fn get_health_status(&self) -> StorageHealth {
+        let max_writes = *self.write_counters.iter().max().unwrap_or(&0);
+        Self::calculate_health_status(max_writes)
     }
 }
 
 impl NonVolatileStorage for Teensy41Storage {
-    fn read(&mut self, offset: usize, buffer: &mut [u8]) -> Result<usize, HalError> {
+    fn read(&mut self, address: u32, buffer: &mut [u8]) -> Result<(), HalError> {
+        let offset = address as usize;
+        
         if offset >= EEPROM_SIZE {
             return Err(HalError::invalid_parameter(
-                format!("Read offset {} exceeds EEPROM size", offset)
+                format!("Read address {} exceeds EEPROM size", address)
             ));
         }
         
         let read_len = core::cmp::min(buffer.len(), EEPROM_SIZE - offset);
         buffer[..read_len].copy_from_slice(&self.eeprom_cache[offset..offset + read_len]);
         
-        log::trace!("EEPROM read: {} bytes from offset {}", read_len, offset);
+        log::trace!("EEPROM read: {} bytes from address {}", read_len, address);
         
-        Ok(read_len)
+        Ok(())
     }
     
-    fn write(&mut self, offset: usize, data: &[u8]) -> Result<(), HalError> {
+    fn write(&mut self, address: u32, data: &[u8]) -> Result<(), HalError> {
+        let offset = address as usize;
+        
         if offset >= EEPROM_SIZE {
             return Err(HalError::invalid_parameter(
-                format!("Write offset {} exceeds EEPROM size", offset)
+                format!("Write address {} exceeds EEPROM size", address)
             ));
         }
         
@@ -602,9 +170,9 @@ impl NonVolatileStorage for Teensy41Storage {
         self.eeprom_cache[offset..offset + write_len].copy_from_slice(&data[..write_len]);
         
         // AUTOMOTIVE REALITY: Write immediately to EEPROM since there's no graceful shutdown
-        // Power loss (key-off) can happen at any time without warning
-        let eeprom_base = 0x1401C000u32 as *mut u8;
+        #[cfg(target_arch = "arm")]
         unsafe {
+            let eeprom_base = 0x1401C000u32 as *mut u8;
             core::ptr::copy_nonoverlapping(
                 data.as_ptr(),
                 eeprom_base.add(offset),
@@ -612,48 +180,82 @@ impl NonVolatileStorage for Teensy41Storage {
             );
         }
         
-        // Update comprehensive wear tracking
-        let current_time = 0; // TODO: Get actual timestamp
-        self.update_wear_tracking(offset, write_len, current_time);
+        // Update wear tracking
+        let region = self.get_region_index(offset);
+        if region < self.write_counters.len() {
+            self.write_counters[region] += 1;
+        }
         
-        // Update legacy write counters for backward compatibility
-        let start_region = self.get_region_index(offset);
-        let end_region = self.get_region_index(offset + write_len - 1);
-        for region in start_region..=end_region {
-            if region < self.write_counters.len() {
-                self.write_counters[region] += 1;
+        log::trace!("EEPROM write: {} bytes to address {} (immediate)", write_len, address);
+        
+        Ok(())
+    }
+    
+    fn erase_sector(&mut self, address: u32) -> Result<(), HalError> {
+        let offset = address as usize;
+        let sector_size = 512; // 512 byte sectors
+        
+        if offset >= EEPROM_SIZE {
+            return Err(HalError::invalid_parameter(
+                format!("Erase address {} exceeds EEPROM size", address)
+            ));
+        }
+        
+        let erase_start = (offset / sector_size) * sector_size;
+        let erase_end = core::cmp::min(erase_start + sector_size, EEPROM_SIZE);
+        
+        // Clear cache sector
+        self.eeprom_cache[erase_start..erase_end].fill(0xFF);
+        
+        // Write to hardware immediately
+        #[cfg(target_arch = "arm")]
+        unsafe {
+            let eeprom_base = 0x1401C000u32 as *mut u8;
+            core::ptr::write_bytes(
+                eeprom_base.add(erase_start),
+                0xFF,
+                erase_end - erase_start
+            );
+        }
+        
+        // Update wear tracking
+        let region = self.get_region_index(offset);
+        if region < self.write_counters.len() {
+            self.write_counters[region] += 1;
+        }
+        
+        log::info!("EEPROM sector erased: address {:#X}, {} bytes", address, erase_end - erase_start);
+        
+        Ok(())
+    }
+    
+    fn capacity(&self) -> u32 {
+        EEPROM_SIZE as u32
+    }
+    
+    fn maintenance(&mut self) -> Result<(), HalError> {
+        // EEPROM doesn't require wear leveling maintenance like flash
+        // This is mainly for monitoring and health reporting
+        
+        let health_status = self.get_health_status();
+        
+        // Log health status for monitoring
+        match health_status {
+            StorageHealth::Warning => {
+                log::warn!("EEPROM showing wear - consider reducing write frequency");
+            },
+            StorageHealth::Critical => {
+                log::error!("EEPROM critically worn - plan ECU replacement soon");
+            },
+            StorageHealth::Failed => {
+                log::error!("EEPROM failure detected - replace ECU immediately");
+            },
+            _ => {
+                log::debug!("EEPROM health: {:?}", health_status);
             }
         }
         
-        log::trace!("EEPROM write: {} bytes to offset {} (immediate)", write_len, offset);
-        
         Ok(())
-    }
-    
-    fn erase_all(&mut self) -> Result<(), HalError> {
-        // Clear cache
-        self.eeprom_cache.fill(0xFF);
-        
-        // Mark all regions dirty
-        self.dirty_regions.fill(true);
-        
-        // Flush to hardware
-        self.flush_dirty_regions()?;
-        
-        log::info!("EEPROM erased completely");
-        
-        Ok(())
-    }
-    
-    fn sync(&mut self) -> Result<(), HalError> {
-        // With immediate writes, sync is a no-op but preserved for trait compatibility
-        // All writes are already persisted to EEPROM immediately
-        log::trace!("EEPROM sync called (no-op with immediate writes)");
-        Ok(())
-    }
-    
-    fn get_size(&self) -> usize {
-        EEPROM_SIZE
     }
 }
 
@@ -684,11 +286,11 @@ impl StorageSection {
     pub fn size(&self) -> usize { self.size }
     
     /// Read from this storage section
-    pub fn read(&self, storage: &mut Teensy41Storage, buffer: &mut [u8]) -> Result<usize, HalError> {
+    pub fn read(&self, storage: &mut Teensy41Storage, buffer: &mut [u8]) -> Result<(), HalError> {
         if buffer.len() > self.size {
             return Err(HalError::invalid_parameter("Buffer larger than section"));
         }
-        storage.read(self.offset, buffer)
+        storage.read(self.offset as u32, buffer)
     }
     
     /// Write to this storage section
@@ -696,7 +298,7 @@ impl StorageSection {
         if data.len() > self.size {
             return Err(HalError::invalid_parameter("Data larger than section"));
         }
-        storage.write(self.offset, data)
+        storage.write(self.offset as u32, data)
     }
 }
 
@@ -705,5 +307,122 @@ impl Drop for Teensy41Storage {
         // In automotive applications, Drop rarely executes due to abrupt power loss (key-off)
         // All writes are immediate, so no data loss occurs even without graceful shutdown
         log::debug!("Storage controller dropped (automotive: immediate writes ensure no data loss)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    fn setup_test_storage() -> Teensy41Storage {
+        Teensy41Storage::new().unwrap()
+    }
+    
+    #[test]
+    fn test_storage_capacity() {
+        let storage = setup_test_storage();
+        assert_eq!(storage.capacity(), 4096);
+    }
+    
+    #[test]
+    fn test_basic_read_write() {
+        let mut storage = setup_test_storage();
+        
+        let test_data = b"Hello, EEPROM!";
+        let mut read_buffer = [0u8; 20];
+        
+        // Write test data
+        storage.write(100, test_data).unwrap();
+        
+        // Read it back
+        storage.read(100, &mut read_buffer).unwrap();
+        
+        // Verify data matches
+        assert_eq!(&read_buffer[..test_data.len()], test_data);
+    }
+    
+    #[test]
+    fn test_sector_erase() {
+        let mut storage = setup_test_storage();
+        
+        // Write some data
+        let test_data = b"This will be erased";
+        storage.write(0, test_data).unwrap();
+        
+        // Erase sector
+        storage.erase_sector(0).unwrap();
+        
+        // Verify data is erased (0xFF)
+        let mut read_buffer = [0u8; 512];
+        storage.read(0, &mut read_buffer).unwrap();
+        assert!(read_buffer.iter().all(|&b| b == 0xFF));
+    }
+    
+    #[test]
+    fn test_wear_tracking() {
+        let mut storage = setup_test_storage();
+        let initial_wear = storage.get_wear_stats();
+        
+        // Perform several writes to region 0
+        for i in 0..5 {
+            storage.write(i * 10, &[0x42]).unwrap();
+        }
+        
+        let updated_wear = storage.get_wear_stats();
+        
+        // Region 0 should have increased write count
+        assert!(updated_wear[0] > initial_wear[0]);
+    }
+    
+    #[test]
+    fn test_storage_sections() {
+        let mut storage = setup_test_storage();
+        
+        // Test each storage section
+        let config_data = b"CONFIG";
+        StorageSection::CONFIG.write(&mut storage, config_data).unwrap();
+        
+        let learned_data = b"LEARNED";
+        StorageSection::LEARNED_DATA.write(&mut storage, learned_data).unwrap();
+        
+        let cal_data = b"CALIBRATION";
+        StorageSection::CALIBRATION.write(&mut storage, cal_data).unwrap();
+        
+        let log_data = b"SAFETY";
+        StorageSection::SAFETY_LOG.write(&mut storage, log_data).unwrap();
+        
+        // Verify each section
+        let mut buffer = [0u8; 20];
+        
+        StorageSection::CONFIG.read(&mut storage, &mut buffer).unwrap();
+        assert_eq!(&buffer[..config_data.len()], config_data);
+        
+        StorageSection::LEARNED_DATA.read(&mut storage, &mut buffer).unwrap();
+        assert_eq!(&buffer[..learned_data.len()], learned_data);
+    }
+    
+    #[test]
+    fn test_address_bounds() {
+        let mut storage = setup_test_storage();
+        
+        // Test read beyond capacity
+        let mut buffer = [0u8; 10];
+        let result = storage.read(5000, &mut buffer);
+        assert!(result.is_err());
+        
+        // Test write beyond capacity
+        let result = storage.write(5000, &[0x42]);
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_health_monitoring() {
+        let mut storage = setup_test_storage();
+        
+        // Initially should be excellent health
+        assert_eq!(storage.get_health_status(), StorageHealth::Excellent);
+        
+        // Maintenance should not fail
+        assert!(storage.maintenance().is_ok());
     }
 }

@@ -233,14 +233,14 @@ fn test_learning_slew_rate_limits() {
 ```rust
 #[test]
 fn test_pressure_sensor_scaling() {
-    // Test 0-30 psi, 0.5-4.5V scaling
-    assert_eq!(scale_pressure_mv(500), 0.0);   // 0.5V = 0 psi
-    assert_eq!(scale_pressure_mv(2500), 15.0); // 2.5V = 15 psi  
-    assert_eq!(scale_pressure_mv(4500), 30.0); // 4.5V = 30 psi
+    // Test 0-30 psi with 10kΩ+20kΩ voltage divider (0.333 ratio): 0.167-1.5V
+    assert_eq!(scale_pressure_mv(167), 0.0);   // 0.167V = 0 psi
+    assert_eq!(scale_pressure_mv(835), 15.0);  // 0.835V = 15 psi  
+    assert_eq!(scale_pressure_mv(1500), 30.0); // 1.5V = 30 psi
     
     // Test bounds
-    assert_eq!(scale_pressure_mv(400), 0.0);   // Below 0.5V clamped
-    assert_eq!(scale_pressure_mv(5000), 30.0); // Above 4.5V clamped
+    assert_eq!(scale_pressure_mv(150), 0.0);   // Below 0.167V clamped
+    assert_eq!(scale_pressure_mv(1600), 30.0); // Above 1.5V clamped
 }
 
 #[test]

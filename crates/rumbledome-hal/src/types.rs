@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// PWM channel identifiers
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PwmChannel {
     /// Main boost control solenoid (4-port MAC)
     BoostSolenoid,
@@ -55,8 +55,28 @@ pub struct CanErrorStats {
     pub rx_errors: u32,
     /// Bus off events
     pub bus_off_count: u32,
+    /// Error passive event count
+    pub error_passive_count: u32,
     /// Last error timestamp
     pub last_error_ms: Option<u64>,
+}
+
+/// CAN health status levels
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum CanHealthStatus {
+    Good,
+    Warning,
+    Poor,
+    Critical,
+}
+
+/// Detailed CAN error statistics for diagnostics
+#[derive(Debug, Clone)]
+pub struct DetailedCanErrorStats {
+    pub basic_stats: CanErrorStats,
+    pub connection_status: bool,
+    pub last_message_age_ms: Option<u64>,
+    pub error_rate: f32, // Errors per second
 }
 
 /// Display color definitions
@@ -123,6 +143,27 @@ pub enum DriveMode {
     Track,
 }
 
+/// Display mode selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// Gauge display with real-time boost/target readings
+    Gauges,
+    /// Full status display with detailed system information  
+    Status,
+    /// Diagnostic display for troubleshooting
+    Diagnostics,
+}
+
+/// Gauge configuration parameters
+#[derive(Debug, Clone)]
+pub struct GaugeConfig {
+    pub min_value: f32,
+    pub max_value: f32,
+    pub warning_threshold: f32,
+    pub danger_threshold: f32,
+    pub label: &'static str,
+}
+
 /// System input data combining all sensors and CAN
 #[derive(Debug, Clone)]
 pub struct SystemInputs {
@@ -130,8 +171,47 @@ pub struct SystemInputs {
     pub sensors: SensorReadings,
     /// CAN bus data
     pub can: CanData,
+    /// Combined manifold pressure (vacuum + boost range)
+    pub combined_manifold_pressure: CombinedManifoldPressure,
     /// Current system time
     pub timestamp_ms: u64,
+}
+
+/// Combined manifold pressure from CAN MAP + boost gauge
+#[derive(Debug, Clone)]
+pub struct CombinedManifoldPressure {
+    /// Full-range manifold pressure in PSI gauge (-14.7 to +30 PSI)
+    pub pressure_gauge_psi: f32,
+    /// Data source for current reading
+    pub primary_source: ManifoldPressureSource,
+    /// Sensor agreement status
+    pub sensor_agreement: SensorAgreement,
+    /// Transition zone handling
+    pub in_transition_zone: bool,
+}
+
+/// Which sensor is providing primary manifold pressure reading
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ManifoldPressureSource {
+    /// Using CAN MAP sensor (vacuum conditions)
+    CanMapSensor,
+    /// Using added boost gauge sensor (boost conditions) 
+    BoostGaugeSensor,
+    /// Blended reading during transition
+    BlendedSensors,
+}
+
+/// Sensor agreement validation between CAN MAP and boost gauge
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SensorAgreement {
+    /// Sensors agree within expected tolerance
+    Good,
+    /// Minor disagreement - use primary source
+    MinorDisagreement,
+    /// Major disagreement - possible sensor fault
+    MajorDisagreement,
+    /// Sensors outside overlap range - normal operation
+    OutOfRange,
 }
 
 impl Default for SensorReadings {

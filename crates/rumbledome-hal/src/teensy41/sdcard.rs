@@ -597,24 +597,24 @@ impl Teensy41SdCard {
         
         let sensor_calibrations = SensorCalibrations {
             dome_input_pressure: PressureSensorCalibration {
-                zero_voltage: 0.5,
-                full_scale_voltage: 4.5,
+                zero_voltage: 0.167, // 0.5V with 10kΩ+20kΩ divider (0.333 ratio)
+                full_scale_voltage: 1.5,  // 4.5V with 10kΩ+20kΩ divider (0.333 ratio)
                 full_scale_pressure: 30.0,
                 sensor_model: "Generic 0-30 PSI".to_string(),
                 calibration_date: 0,
                 notes: "Standard automotive pressure sensor".to_string(),
             },
             upper_dome_pressure: PressureSensorCalibration {
-                zero_voltage: 0.5,
-                full_scale_voltage: 4.5,
+                zero_voltage: 0.167, // 0.5V with 10kΩ+20kΩ divider (0.333 ratio)
+                full_scale_voltage: 1.5,  // 4.5V with 10kΩ+20kΩ divider (0.333 ratio)
                 full_scale_pressure: 30.0,
                 sensor_model: "Generic 0-30 PSI".to_string(),
                 calibration_date: 0,
                 notes: "Standard automotive pressure sensor".to_string(),
             },
             manifold_pressure: PressureSensorCalibration {
-                zero_voltage: 0.5,
-                full_scale_voltage: 4.5,
+                zero_voltage: 0.167, // 0.5V with 10kΩ+20kΩ divider (0.333 ratio)
+                full_scale_voltage: 1.5,  // 4.5V with 10kΩ+20kΩ divider (0.333 ratio)
                 full_scale_pressure: 30.0,
                 sensor_model: "Generic MAP Sensor".to_string(),
                 calibration_date: 0,

@@ -16,7 +16,7 @@ rumbledome-hal = { path = "../rumbledome-hal", features = ["teensy41"] }
 
 # Teensy 4.1 / i.MX RT1062 dependencies
 cortex-m = "0.7"
-cortex-m-rt = "0.7"
+cortex-m-rt = { version = "0.7", optional = true }
 embedded-hal = "1.0"
 nb = "1.0"
 
@@ -28,7 +28,6 @@ imxrt-ral = "0.5"
 
 # Additional embedded dependencies
 heapless = "0.8"
-rtic = "2.0"
 embedded-storage = "0.3"
 embedded-can = "0.4"
 

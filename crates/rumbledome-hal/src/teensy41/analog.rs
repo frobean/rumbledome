@@ -65,9 +65,10 @@ impl Teensy41Analog {
         adc2.calibrate()
             .map_err(|e| HalError::adc_error(format!("ADC2 calibration failed: {:?}", e)))?;
         
-        // Default sensor calibration (will be overridden by configuration)
-        let calibration_offsets = [0.5, 0.5, 0.5]; // 0.5V offset for 0-30 PSI sensors
-        let calibration_scales = [7.5, 7.5, 7.5];  // 7.5 PSI/V for 0-30 PSI sensors
+        // Default sensor calibration for 10kΩ+20kΩ voltage divider (0.333 ratio)
+        // Original: 0.5V-4.5V → Divided: 0.167V-1.5V  
+        let calibration_offsets = [0.167, 0.167, 0.167]; // 0.167V offset (0.5V * 0.333)
+        let calibration_scales = [22.56, 22.56, 22.56]; // 22.56 PSI/V (30 PSI / 1.33V span)
         
         log::info!("ADC initialized with 12-bit resolution, 4x averaging");
         
@@ -203,10 +204,10 @@ pub struct PressureSensorConfig {
 
 impl Default for PressureSensorConfig {
     fn default() -> Self {
-        // Default for typical 0-30 PSI, 0.5-4.5V sensors
+        // Default for 0-30 PSI sensors with 10kΩ+20kΩ voltage divider (0.333 ratio)
         Self {
-            zero_voltage: 0.5,
-            full_scale_voltage: 4.5,
+            zero_voltage: 0.167, // 0.5V * 0.333
+            full_scale_voltage: 1.5, // 4.5V * 0.333
             full_scale_pressure: 30.0,
         }
     }

@@ -20,7 +20,8 @@ three pressure sensors, TFT display, and CAN integration with the ECU's torque m
   2) Upper dome line (near wastegate)  
   3) Intake manifold (post-throttle) for boost reference
 - **Transducers:** 1/8″ NPT, 0–30 psi gauge, 0.5–4.5 V out at 5 V supply.  
-  Estimated scale: `PSI = ((Vout − 0.5) / 4.0) * 30`.
+  **With 10kΩ+20kΩ voltage divider:** 0.167–1.5 V input to Teensy ADC.  
+  Scale: `PSI = ((Vout − 0.167) / 1.33) * 30`.
 - **Display:** ST7735R TFT 1.8″ 128×160 in a 60 mm gauge pod.
 - **CAN:** via OBD‑II adapter; transceiver SN65HVD230 (3.3 V) or equivalent.
 - **Inputs:** at least one momentary switch (profile change); optional scramble button.
@@ -79,6 +80,13 @@ three pressure sensors, TFT display, and CAN integration with the ECU's torque m
 Similar to STFT/LTFT in ECUs: maintain fast and slow trims on the duty→boost mapping, persist with wear‑aware cadence.
 Trims are **rate-limited** and bounded, and are **shared across profiles** (physics are common) while keeping profile targets distinct.
 Provide a **console command** to reset trims.
+
+### Sensor Fusion Learning
+- **Cross-calibration**: Automatically learns offset between CAN MAP and boost gauge sensors
+- **Overlap zone learning**: Calibration occurs in ±2 PSI around atmospheric pressure
+- **Exponential moving average**: 1% learning rate for stable convergence
+- **Persistent storage**: Cross-calibration stored with environmental factors in EEPROM
+- **No sensor faults**: System adapts to differences rather than throwing errors
 
 ## Power & Safety
 

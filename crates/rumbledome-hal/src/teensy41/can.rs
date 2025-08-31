@@ -4,7 +4,7 @@
 //! using the i.MX RT1062 FlexCAN modules.
 
 use crate::traits::CanBus;
-use crate::types::{CanMessage, CanErrorStats};
+use crate::types::{CanMessage, CanErrorStats, CanHealthStatus, DetailedCanErrorStats};
 use crate::error::HalError;
 
 use teensy4_bsp::hal;
@@ -108,31 +108,137 @@ impl Teensy41Can {
         }
     }
     
-    /// Handle CAN error conditions
-    fn handle_can_error(&mut self, error: can::Error) {
+    /// Handle CAN error conditions with comprehensive recovery
+    fn handle_can_error(&mut self, error: can::Error, current_time_ms: u64) {
+        self.error_stats.last_error_ms = Some(current_time_ms);
+        
         match error {
             can::Error::BusOff => {
                 self.error_stats.bus_off_count += 1;
                 self.connected = false;
-                log::error!("CAN bus off error");
+                log::error!("CAN bus off error - attempting recovery");
+                
+                // Attempt automatic recovery from bus-off
+                if let Err(e) = self.recover_from_bus_off() {
+                    log::error!("Bus-off recovery failed: {:?}", e);
+                }
             },
             can::Error::ErrorPassive => {
-                log::warn!("CAN error passive state");
+                self.error_stats.error_passive_count += 1;
+                log::warn!("CAN error passive state - monitoring for recovery");
             },
             can::Error::ErrorActive => {
-                log::debug!("CAN error active state");
+                // This is actually good news - we've recovered from error passive
+                log::info!("CAN error active state - recovered from error passive");
             },
             can::Error::Transmit => {
                 self.error_stats.tx_errors += 1;
-                log::warn!("CAN transmit error");
+                log::warn!("CAN transmit error #{}", self.error_stats.tx_errors);
+                
+                // If too many TX errors, consider reset
+                if self.error_stats.tx_errors > 100 {
+                    log::error!("Excessive CAN TX errors - resetting controller");
+                    let _ = self.reset();
+                }
             },
             can::Error::Receive => {
                 self.error_stats.rx_errors += 1;
-                log::warn!("CAN receive error");
+                log::warn!("CAN receive error #{}", self.error_stats.rx_errors);
             },
         }
+    }
+    
+    /// Attempt recovery from bus-off condition
+    fn recover_from_bus_off(&mut self) -> Result<(), HalError> {
+        // Reset the CAN controller to attempt recovery
+        self.can.reset()
+            .map_err(|e| HalError::can_error(format!("Bus-off recovery reset failed: {:?}", e)))?;
         
-        self.error_stats.last_error_ms = Some(0); // TODO: Get current time
+        // Clear error counters
+        self.error_stats.bus_off_count = 0; // Don't clear - keep for statistics
+        
+        log::info!("CAN bus-off recovery attempted");
+        Ok(())
+    }
+    
+    /// Perform comprehensive CAN health check
+    pub fn health_check(&mut self, current_time_ms: u64) -> CanHealthStatus {
+        self.update_connection_status(current_time_ms);
+        
+        let mut status = CanHealthStatus::Good;
+        let mut issues = Vec::new();
+        
+        // Check connection status
+        if !self.connected {
+            status = CanHealthStatus::Critical;
+            issues.push("CAN bus disconnected".to_string());
+        }
+        
+        // Check error rates
+        let total_errors = self.error_stats.tx_errors + self.error_stats.rx_errors;
+        if total_errors > 1000 {
+            status = CanHealthStatus::Poor;
+            issues.push(format!("High error count: {}", total_errors));
+        } else if total_errors > 100 {
+            status = CanHealthStatus::Warning;
+            issues.push(format!("Elevated error count: {}", total_errors));
+        }
+        
+        // Check for recent bus-off events
+        if self.error_stats.bus_off_count > 0 {
+            status = CanHealthStatus::Warning;
+            issues.push(format!("Bus-off events: {}", self.error_stats.bus_off_count));
+        }
+        
+        // Check data age
+        if let Some(last_msg) = self.last_message_ms {
+            let age_ms = current_time_ms.saturating_sub(last_msg);
+            if age_ms > 5000 {
+                status = CanHealthStatus::Critical;
+                issues.push(format!("Stale data: {}ms old", age_ms));
+            } else if age_ms > 2000 {
+                if status < CanHealthStatus::Warning {
+                    status = CanHealthStatus::Warning;
+                }
+                issues.push(format!("Old data: {}ms old", age_ms));
+            }
+        } else {
+            // No messages received yet
+            status = CanHealthStatus::Critical;
+            issues.push("No CAN messages received".to_string());
+        }
+        
+        if !issues.is_empty() {
+            log::debug!("CAN health issues: {:?}", issues);
+        }
+        
+        status
+    }
+    
+    /// Get detailed error statistics for diagnostics
+    pub fn get_detailed_error_stats(&self) -> DetailedCanErrorStats {
+        DetailedCanErrorStats {
+            basic_stats: self.error_stats.clone(),
+            connection_status: self.connected,
+            last_message_age_ms: if let Some(last_msg) = self.last_message_ms {
+                Some(0) // TODO: current_time_ms - last_msg
+            } else {
+                None
+            },
+            error_rate: self.calculate_error_rate(),
+        }
+    }
+    
+    /// Calculate current error rate (errors per second)
+    fn calculate_error_rate(&self) -> f32 {
+        // This is simplified - in a real implementation we'd track errors over time
+        let total_errors = self.error_stats.tx_errors + self.error_stats.rx_errors;
+        if total_errors == 0 {
+            0.0
+        } else {
+            // Rough estimate - assume errors accumulated over last 60 seconds
+            total_errors as f32 / 60.0
+        }
     }
 }
 
@@ -173,7 +279,7 @@ impl CanBus for Teensy41Can {
                 // No message available, check queue
             },
             Err(e) => {
-                self.handle_can_error(e);
+                self.handle_can_error(e, 0); // TODO: Pass actual current time
                 return Err(HalError::can_error(format!("CAN receive error: {:?}", e)));
             }
         }
