@@ -1,5 +1,7 @@
 # RumbleDome Communication Protocols
 
+📖 **For terminology**: See **[Definitions.md](Definitions.md)** for protocol concepts and technical terms
+
 ## JSON/CLI Protocol
 
 All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All responses include `"ok": true|false` and `"err"` field when false.
@@ -24,7 +26,7 @@ All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All 
     "actual_torque": 180.0,
     "target_boost": 5.0,
     "learned_duty": 24.5,
-    "profile": "Daily",
+    "aggression": 0.3,
     "state": "Armed",
     "calibration_progress": "6.5/9.5 psi",
     "pneumatic_health": "optimal",
@@ -44,47 +46,37 @@ All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All 
   "ok": true,
   "data": {
     "spring_pressure": 5.0,
-    "profiles": {
-      "Daily": {
-        "boost_targets": [[1500, 0.0], [2500, 3.0], [3500, 7.0], [4500, 8.0]],
-        "overboost_limit": 9.5,
-        "overboost_hysteresis": 0.3
-      }
-    },
-    "active_profile": "Daily",
-    "scramble_profile": "Track",
-    "torque_target_percentage": 95,
-    "boost_slew_rate": 2.0
+    "aggression": 0.3,
+    "scramble_enabled": true,
+    "max_boost_psi": 9.0,
+    "overboost_limit": 15.0
   }
 }
 ```
 
-### Profile Management
+### Aggression Control
 
-#### Set Profile Configuration
+#### Set Aggression
 ```json
 {
-  "cmd": "set_profile",
-  "name": "Daily",
-  "boost_targets": [[1500, 0.0], [2500, 3.0], [3500, 7.0], [4500, 8.0]],
-  "overboost_limit": 9.5,
-  "overboost_hysteresis": 0.3
+  "cmd": "set_aggression", 
+  "aggression": 0.3
 }
 ```
 
-#### Switch Active Profile
+#### Set Maximum Boost
 ```json
 {
-  "cmd": "set_active_profile",
-  "name": "Daily"
+  "cmd": "set_max_boost",
+  "max_boost_psi": 9.0
 }
 ```
 
-#### Set Scramble Profile
+#### Enable/Disable Scramble Button
 ```json
 {
-  "cmd": "set_scramble_profile", 
-  "name": "Track"
+  "cmd": "set_scramble_enabled", 
+  "enabled": true
 }
 ```
 
@@ -138,6 +130,8 @@ All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All 
 { "cmd": "reset_learned_data" }
 ```
 
+📋 **For complete learned data details**: See **[LearnedData.md](LearnedData.md)** for comprehensive specification of all parameters that are reset by this command
+
 #### Get Learning Status
 ```json
 { "cmd": "learning_status" }
@@ -187,7 +181,7 @@ All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All 
 ```json
 {
   "cmd": "recommend_input_pressure",
-  "max_boost_target": 9.5,
+  "max_boost_psi": 9.5,
   "spring_pressure": 5.0
 }
 ```
@@ -275,11 +269,11 @@ All commands return error responses in this format when `"ok": false`:
 ```json
 {
   "ok": false,
-  "err": "Invalid profile name",
+  "err": "Invalid control knob position",
   "details": {
-    "code": "PROFILE_NOT_FOUND",
-    "requested_profile": "InvalidName",
-    "available_profiles": ["Valet", "Daily", "Aggressive", "Track"]
+    "code": "CONTROL_KNOB_OUT_OF_RANGE", 
+    "requested_knob": 1.5,
+    "valid_range": "0.0 to 1.0"
   }
 }
 ```

@@ -1,8 +1,8 @@
-# RumbleDome: Torque-Based Electronic Boost Controller
+# RumbleDome: Torque-Following Electronic Boost Controller
 
-Welcome to **Mad Hacks: RumbleDome** — a custom, full-dome electronic boost controller built around the Teensy 4.1 microcontroller and written in Rust.  
+Welcome to **Mad Hacks: RumbleDome** — a revolutionary electronic boost controller that replaces complex configuration with a **single control knob** from "puppy dog" to "brimstone."
 
-This project explores innovative electronic boost control through torque-based ECU cooperation and auto-calibration.  
+Built on Teensy 4.1 and written in Rust, RumbleDome implements intelligent **torque-following control** that automatically provides the boost your ECU is asking for, scaled by your preference for responsiveness and aggression.  
 
 ---
 
@@ -24,123 +24,88 @@ I'm making this open source and available on the off chance that someone else mi
 
 Consider yourself warned.
 
-**Recent Development Notes (Jan 2025)**:
-- PWM synchronization system prevents phase noise in dome pressure control
-- EEPROM implementation handles automotive power-loss scenarios safely
-- Voltage divider support enables standard 5V pressure sensors with 3.3V ADC
-- Comprehensive test framework provides safety validation foundation  
+**🎯 What Makes RumbleDome Different:**
+
+RumbleDome is **not a traditional boost controller** - it's a **torque request amplifier** that works in harmony with your ECU to drive the turbos. Instead of fighting the ECU with predefined boost curves, RumbleDome reads the ECU's torque requests via CAN bus and intelligently provides exactly the boost needed to help achieve those targets. 
+
+**Key Innovations**: 
+- **Torque management awareness**: RumbleDome interfaces with the CAN bus, reads the ECU's desured vs actual torque in realtime, and uses the delta to decide how much boost to add or remove to meet the ECU's torque requests.
+- **Single control knob**: Sets how aggressively RumbleDome manages the turbos to achieve the ECU's desired torque.
+- **Simplified Configuration**: User sets the mechanical spring pressure, overboost PSI, and nominal maximum operating PSI during initial setup.  The aggression level is set via a simple dial encoder and can be changed on the fly.  
+- **Self-learning**: Fully closed-loop operation. The rest of the operating parameters are auto-learned by watching the appropriate sensors and engine telemetry (similar to how the ECU learns to adjust fuel trims) so the system improves over time and adjusts to transient environmental changes without user intervention.
 
 --
 
 ## 📖 Project Overview
-- **Firmware**: Rust (no unsafe where possible), modular design, Teensy 4.1 target.  
-- **Hardware**:
-  - Teensy 4.1 MCU  
-  - 4-port MAC solenoid (100 Hz PWM, 0% duty = failsafe to no boost)  
-  - 3 pressure sensors (0–30 psi, 5V output with 3.3V voltage dividers)  
-  - ST7735R TFT LCD (1.8" 128×160)  
-  - CAN bus transceiver (SN65HVD230 or similar)  
-  - OBD2 adapter for CAN connection  
-  - MicroSD card for portable configuration  
-- **Concept**: Closed-loop, self-learning dome pressure control with multiple user profiles and fail-safes.  
+📋 **Complete technical specifications**: [TechnicalSpecs.md](docs/TechnicalSpecs.md)
+
+- **Firmware**: Rust (no unsafe where possible), modular design 
+- **Hardware**: Teensy 4.1 MCU, 4-port MAC solenoid, 4 pressure sensors, ST7735R display, CAN interface, Bluetooth, MicroSD, custom PCB 'mainboard' to host the teensy and additional circuitry needed for power management, CAN integration, and other sensors.
+- **Concept**: Revolutionary single-knob torque-following control that eliminates configuration complexity while providing comprehensive operational envelope scaling. Includes closed-bias wastegate control for efficiency and 4-sensor dome diagnostics.  
 
 ---
 
 ## 🗂 Repo Structure
 - `/crates` → Rust workspace with modular crates for hardware abstraction, control logic, and testing.  
-- `/docs` → Design documents and specifications.  
-  - `Context.md` → High-level design context (narrative + goals).  
-  - `Requirements.md` → Functional and performance requirements.
-  - `Architecture.md` → System design and component architecture.
-  - `Safety.md` → Safety requirements and critical constraints.
-  - `Protocols.md` → JSON/CLI communication protocol specifications.
-  - `Hardware.md` → Hardware abstraction layer and platform specifications.
-  - `Implementation.md` → Code structure, build process, and development workflow.
-  - `Definitions.md` → Acronyms, jargon, and domain-specific terminology.  
+- `/docs` → Design documents and specifications.
+
+### 📚 Documentation Reading Order
+
+**Essential Foundation (read in order):**
+1. `Context.md` → High-level design context and goals
+2. `Physics.md` → Turbo system physics and control theory fundamentals  
+3. `Requirements.md` → Functional and performance requirements
+4. `Safety.md` → Safety requirements and critical constraints
+
+**Implementation Details:**
+5. `Architecture.md` → System design and component architecture
+6. `Hardware.md` → Hardware abstraction layer and platform specifications
+7. `CAN_Signals.md` → Ford Gen2 Coyote CAN bus signal specifications
+8. `Protocols.md` → JSON/CLI communication protocol specifications
+
+**Development & Reference:**
+9. `Implementation.md` → Code structure, build process, and development workflow
+10. `TestPlan.md` → Testing strategy and validation procedures
+11. `Definitions.md` → Acronyms, jargon, and domain-specific terminology
+12. `BeyondRumbleDome.md` → Future enhancement concepts  
 
 ---
 
-## 🧭 Getting Started
-**For developers**:
-1. Start by reading `docs/Context.md` for the project narrative.  
-2. Review `docs/Requirements.md` for what the system must do.
-3. Study `docs/Safety.md` for critical safety requirements.
-4. Read `docs/Architecture.md` for system design and component relationships.
-5. Reference `docs/Implementation.md` for build process and development workflow.  
+---
+
+## 🚀 Quick Start
+
+**👨‍🔬 For Researchers/Students**: Want to understand the technical approach?  
+→ Read [Context.md](docs/Context.md) and [Physics.md](docs/Physics.md)
+
+**👩‍💻 For Developers**: Ready to contribute or build?  
+→ Follow the [documentation reading order](docs/README.md) starting with Context → Physics → Requirements
+
+**🔧 For Users**: Want to build and install?  
+→ Hardware assembly and installation guides coming in Phase 8
+
+**📊 For Data/Tuning**: Want to understand the protocols?  
+→ See [Protocols.md](docs/Protocols.md) for JSON/CLI interface specification
+
+## ✨ Technical Highlights
+
+**🎛️ Single-Knob Revolution**: Eliminates complex boost curve configuration with one intuitive control  
+**🤝 ECU Cooperation**: Works with your ECU's torque management, never fights it  
+**🔒 Safety-First**: Multiple layers of protection with fail-safe defaults (0% duty = minimal boost)  
+**📡 CAN Integration**: Real-time torque data from Ford Gen2 Coyote ECU  
+**⚡ Real-Time Control**: 100Hz control loop with 30Hz PWM synchronization
+
+*For detailed technical achievements, see [Architecture.md](docs/Architecture.md)*
 
 ---
 
-## 🛡 Development Principles
-- Specs and context docs are the **single source of truth**.  
-- Any new insights → update the docs first, then code.  
-- Code must be **verbose, modular, and testable**.  
-- Failure paths must **always fail safe** (drop to zero boost).
+## 🚀 Current Status
 
-## 🔧 Key Technical Achievements
+**Design Complete - Ready for Fresh Implementation**
 
-### PWM Synchronization Innovation
-Solved critical phase noise issue in pneumatic control through:
-- **Beat frequency prevention**: Control loop timing coordinated with PWM cycles
-- **Jitter reduction**: Deadband filtering based on FlexPWM hardware resolution
-- **Multiple sync strategies**: Optimized timing for different performance requirements
-- **Automotive timing constraints**: 100Hz PWM with ±10% update windows
+The comprehensive design and specification work has been completed, providing a solid foundation for implementation. All documentation has been refined and aligned around the torque-following architecture.
 
-### Storage Architecture for Automotive Reality
-- **Immediate write-through**: No graceful shutdown dependency (key-off = instant power loss)
-- **Dual-tier storage**: EEPROM for hardware-specific data, SD card for portable profiles
-- **Comprehensive wear tracking**: Predictive maintenance with years of advance warning
-- **Backup/restore system**: Complete microcontroller replacement workflow
-
-### Voltage Interface Adaptation
-- **5V→3.3V scaling**: 10kΩ+20kΩ voltage divider support throughout codebase
-- **Optimized resolution**: 0.018 PSI with 12-bit ADC for precise boost control
-- **Calibration automation**: Sensor scaling factors updated automatically
-- **Documentation synchronization**: All docs updated for new voltage ranges
-
-### Intelligent Sensor Fusion
-- **Dual MAP sensor strategy**: CAN MAP (vacuum) + boost gauge (positive pressure)
-- **Automatic cross-calibration**: Learns systematic offset between sensors during operation
-- **Seamless range coverage**: Full spectrum from deep vacuum (-14.7 PSI) to high boost (+30 PSI)
-- **No sensor faults**: System adapts to sensor differences instead of throwing errors
-
----
-
-## 🚀 Implementation Status
-
-### Phase 6: Hardware Abstraction ✅
-- [x] Complete Teensy 4.1 HAL implementation
-- [x] FlexPWM solenoid control (100Hz with PWM synchronization)
-- [x] Dual ADC pressure sensor reading (12-bit, 4x averaging, voltage divider support)
-- [x] FlexCAN integration with Ford Gen2 Coyote parsing
-- [x] ST7735R TFT display with gauges and status
-- [x] FlexRAM EEPROM emulation (4KB organized storage)
-- [x] GPIO control for buttons and status LEDs
-- [x] Bluetooth serial interface for wireless configuration
-- [x] MicroSD card support for portable profiles
-
-### Phase 7: Control Systems ✅  
-- [x] 3-level control hierarchy implementation
-- [x] PWM-synchronized control loop timing (jitter reduction)
-- [x] Torque-based boost target modulation
-- [x] PID controller with learned baseline correction
-- [x] Safety monitoring and overboost protection
-- [x] Auto-calibration with progressive safety limits
-- [x] Comprehensive test framework foundation
-
-### Phase 8: Testing & Validation 🔄
-- [x] Unit test structure for safety-critical functions
-- [x] Storage operation validation tests
-- [x] PWM timing coordination tests
-- [ ] Integration tests for full control cycles
-- [ ] Hardware-in-loop validation setup
-- [ ] Safety system stress testing
-
-### Phase 9: Next Steps 📋
-- [ ] Real vehicle CAN signal mapping (replace speculative IDs)
-- [ ] Physical hardware validation and sensor calibration
-- [ ] Complete desktop simulator implementation
-- [ ] Mobile app development for Bluetooth interface
-- [ ] Production deployment testing
+*For detailed development phases, progress tracking, and current task status, see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md)*
 
 ## 🤖 AI Working Agreements
 When assisting with this project, AI must:
@@ -156,88 +121,61 @@ When assisting with this project, AI must:
 
 ---
 
-## 🚦 Development Status
-
-**Current Status: ~80% Implementation Complete**
-
-### Phase 0: Foundation ✅
-- [x] Context defined  
-- [x] Design spec fleshed out  
-- [x] Interfaces defined (CAN signals speculative, need vehicle verification)
-
-### Phase 1: Core Infrastructure ✅
-- [x] Rust workspace scaffolding (Cargo.toml, crate structure)
-- [x] HAL trait definitions and mock implementations
-- [x] Basic unit test framework setup
-- [x] Core data structures (SystemConfig, LearnedData, etc.)
-- [x] State machine implementation
-- [x] Error handling and fault management system
-
-### Phase 3: Control Logic ✅ (Completed ahead of Phase 2)
-- [x] Profile management system
-- [x] 3-level control loop implementation (Torque → PID → Safety)
-- [x] PID controller with environmental compensation
-- [x] Safety override with hysteresis and slew limiting
-- [x] Environmental compensation algorithms
-- [x] Real-time system integration (100Hz RTIC-based loop)
-
-### Phase 4: Learning Systems ✅
-- [x] Auto-calibration state machine (Conservative → Validation phases)
-- [x] Progressive safety limit expansion
-- [x] 2D interpolation tables for duty cycle learning
-- [x] Environmental factor compensation learning
-- [x] Confidence tracking and bounded learning validation
-
-### Phase 5: Desktop Simulator ✅
-- [x] Complete desktop simulator with interactive TUI
-- [x] Realistic Gen2 Coyote engine physics simulation
-- [x] 6 comprehensive test scenarios (idle, WOT, overboost, etc.)
-- [x] Real-time gauge display and interactive controls
-- [x] Configuration management and scenario testing
-
-### Phase 6: Hardware Abstraction ✅
-- [x] Complete Teensy 4.1 HAL implementation
-- [x] FlexPWM solenoid control (30Hz, safety failsafe)
-- [x] Dual ADC pressure sensor reading (12-bit, 4x averaging)
-- [x] FlexCAN integration with Ford Gen2 Coyote parsing
-- [x] ST7735R TFT display with gauges and status
-- [x] FlexRAM EEPROM emulation (4KB organized storage)
-- [x] GPIO with debounced buttons and LED patterns
-- [x] DWT-based precision timing (600MHz resolution)
-- [x] Hardware watchdog integration
-
-### Phase 7: Real-Time Firmware ✅
-- [x] RTIC-based concurrent firmware architecture
-- [x] 100Hz control loop with performance monitoring
-- [x] Concurrent tasks (control, status, diagnostics, UI)
-- [x] JSON protocol implementation for communication
-- [x] Safety-critical design patterns throughout
-
-### Phase 2: Hardware Integration 🚧
-- [⏳] Compilation testing (awaiting Rust toolchain in VM)
-- [⏳] Real hardware bring-up and pin assignment validation
-- [⏳] CAN signal verification with actual Ford Gen2 Coyote vehicle
-- [⏳] Pressure sensor calibration with real sensors
-
-### Phase 8: Testing & Validation ⏳
-- [ ] Unit tests for control algorithms
-- [ ] Hardware-in-loop testing setup
-- [ ] Safety system validation tests
-- [ ] Real vehicle integration testing
-- [ ] Performance benchmarking and optimization
-
-### Phase 9: CLI Configuration Tool ⏳
-- [ ] Command-line configuration and tuning tool
-- [ ] Profile management utilities
-- [ ] Diagnostic data export and analysis
-- [ ] Firmware update and deployment utilities  
+## 🛡️ Development Principles
+- Documentation is the **single source of truth**  
+- Code must be **verbose, modular, and testable**  
+- Failure paths **always fail safe** (drop to zero boost)
+- Safety requirements take precedence over performance  
 
 ---
 
-## 🔧 Development
-- **Build instructions**: TBD  
-- **Wiring diagrams**: TBD  
-- **Contribution**: Fork, branch, PR.
+## 📋 Documentation Management: AI-Traceable Engineering
+
+**RumbleDome uses systematic traceability** - every technical decision links back to foundational requirements through T1→T2→T3→T4 IDs. This creates a "journaled filesystem" for engineering decisions.
+
+### **Maintenance Strategy**
+
+**✅ Safe Editing Approach:**
+1. **Edit freely** - focus on content quality and clarity
+2. **Commit incremental changes** - frequent git commits capture stable states
+3. **Run periodic validation** - use AI to check traceability integrity
+4. **Batch repairs** - fix linkage issues in dedicated sessions
+
+**🔧 Validation Checklist:**
+- All `T1-xxx → T2-xxx → T3-xxx → T4-xxx` links point to existing content
+- Cross-references (`docs/File.md`) resolve correctly  
+- Decision classifications remain consistent
+- No orphaned traceability IDs
+
+**⚠️ Recovery Process:**
+If documentation becomes inconsistent:
+1. **Git rollback** to last known-good state
+2. **Selective restoration** of working sections
+3. **AI-assisted repair** of broken linkages
+4. **Incremental validation** before continuing
+
+**🤖 AI Role in Maintenance:**
+- **Traceability validation** - verify all links remain valid
+- **Cross-reference repair** - fix broken documentation links  
+- **Impact analysis** - identify changes that affect multiple tiers
+- **Consistency enforcement** - ensure decision classifications align
+
+This approach preserves the systematic traceability benefits while keeping documentation maintainable. The journaling creates recovery points, and AI assistance scales the complexity management.
+
+---
+
+## 🤝 Contributing
+
+**Want to help?** 
+- 📖 **Documentation**: Improvements to clarity and accuracy always welcome
+- 🧪 **Testing**: Help validate control algorithms and safety systems  
+- 🔧 **Hardware**: Real-world sensor calibration and CAN signal verification
+- 💻 **Code**: See [Implementation.md](docs/Implementation.md) for development setup
+
+**Process**: Fork → Branch → Pull Request  
+**Questions?** Open an issue for discussion before major changes
+
+**📋 Documentation Contributors**: When editing docs with T1-T4 traceability IDs, feel free to focus on content quality. Traceability consistency can be validated and repaired in separate maintenance sessions.
 
 ---
 

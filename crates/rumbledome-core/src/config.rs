@@ -1,507 +1,279 @@
-//! Configuration management for RumbleDome
+//! Configuration Management
+//! 
+//! 🔗 T4-CORE-010: Configuration Implementation
+//! Derived From: T3-BUILD-004 (5-Parameter Configuration Implementation) + T2-HAL-003
+//! AI Traceability: Single-knob philosophy implementation, parameter validation
 
+use alloc::string::String;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::CoreError;
 
-/// Main system configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// User configuration structure - exactly 5 parameters
+/// 
+/// 🔗 T4-CORE-011: 5-Parameter Configuration Structure
+/// Derived From: T1-UI-001 (Single Parameter Philosophy) + T2-CONFIG-001 (Pressure-Based Configuration)
+/// AI Traceability: Implements single-knob control philosophy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
+    /// Aggression level (0.0-1.0) - scales all system behavior
+    /// 0.0 = OFF (as close to naturally aspirated as physically possible)
+    /// 1.0 = Maximum system aggression (instant ECU torque request assistance)
+    pub aggression: f32,
+    
     /// Wastegate spring pressure in PSI
+    /// Used for control authority calculations and mechanical failsafe baseline
     pub spring_pressure: f32,
     
-    /// Available boost profiles
-    pub profiles: HashMap<String, BoostProfile>,
+    /// Maximum boost pressure ceiling in PSI (not knob-scaled target)
+    /// Safety ceiling for boost pressure - system will not exceed this value
+    pub max_boost_psi: f32,
     
-    /// Currently active profile name
-    pub active_profile: String,
-    
-    /// Scramble boost profile name
-    pub scramble_profile: String,
-    
-    /// Torque target strategy (percentage of ECU desired torque to target)
-    pub torque_target_percentage: f32,
-    
-    /// Boost change slew rate limit in PSI/second
-    pub boost_slew_rate: f32,
-    
-    /// Control loop frequency in Hz
-    pub control_frequency: u16,
-    
-    /// Safety limits and parameters
-    pub safety: SafetyConfig,
-    
-    /// Platform-specific CAN configuration
-    pub can: CanConfig,
-    
-    /// Hardware-specific calibration
-    pub hardware: HardwareConfig,
-}
-
-/// Boost profile definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoostProfile {
-    /// Profile display name
-    pub name: String,
-    
-    /// Description of profile purpose
-    pub description: String,
-    
-    /// Boost targets as RPM -> PSI mapping
-    /// Points are linearly interpolated between defined RPM values
-    pub boost_targets: Vec<BoostPoint>,
-    
-    /// Maximum boost pressure limit for this profile
-    pub max_boost: f32,
-    
-    /// Overboost cut threshold (above max_boost)
+    /// Hard safety fault threshold in PSI - never exceed
+    /// Overboost protection triggers fault condition if exceeded
     pub overboost_limit: f32,
     
-    /// Overboost recovery hysteresis in PSI
-    pub overboost_hysteresis: f32,
-    
-    /// Profile-specific PID tuning
-    pub pid_tuning: PidConfig,
-}
-
-/// RPM to boost pressure mapping point
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoostPoint {
-    /// Engine RPM
-    pub rpm: u16,
-    /// Target boost pressure in PSI gauge
-    pub boost_psi: f32,
-}
-
-/// PID controller configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PidConfig {
-    /// Proportional gain
-    pub kp: f32,
-    /// Integral gain
-    pub ki: f32,
-    /// Derivative gain
-    pub kd: f32,
-    /// Integral windup limit
-    pub integral_limit: f32,
-}
-
-/// Safety system configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SafetyConfig {
-    /// Global overboost limit regardless of profile
-    pub global_overboost_limit: f32,
-    
-    /// Maximum duty cycle change per control cycle (%)
-    pub max_duty_change_per_cycle: f32,
-    
-    /// Maximum safe RPM for boost control
-    pub max_rpm: u16,
-    
-    /// Minimum engine RPM to arm system
-    pub min_rpm_for_arming: u16,
-    
-    /// Sensor validation ranges
-    pub sensor_ranges: SensorRanges,
-    
-    /// CAN timeout before fault condition (ms)
-    pub can_timeout_ms: u64,
-    
-    /// Maximum control loop execution time before warning (ms)
-    pub max_loop_time_ms: u64,
-}
-
-/// Sensor validation ranges
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SensorRanges {
-    /// Dome input pressure valid range (PSI)
-    pub dome_input_pressure: (f32, f32),
-    
-    /// Upper dome pressure valid range (PSI)
-    pub upper_dome_pressure: (f32, f32),
-    
-    /// Manifold pressure valid range (PSI gauge)
-    pub manifold_pressure: (f32, f32),
-}
-
-/// CAN bus configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanConfig {
-    /// CAN bus bit rate
-    pub bitrate: u32,
-    
-    /// Platform-specific signal definitions
-    pub signals: CanSignalConfig,
-}
-
-/// CAN signal configuration for specific vehicle platform
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanSignalConfig {
-    /// Engine RPM signal
-    pub rpm: CanSignal,
-    
-    /// Manifold absolute pressure signal
-    pub map: CanSignal,
-    
-    /// ECU desired torque signal
-    pub desired_torque: CanSignal,
-    
-    /// ECU actual torque signal
-    pub actual_torque: CanSignal,
-    
-    /// Throttle position signal (optional, for Phase 2+)
-    pub throttle_position: Option<CanSignal>,
-    
-    /// Drive mode signal (optional, for Phase 2+)
-    pub drive_mode: Option<CanSignal>,
-}
-
-/// Individual CAN signal definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanSignal {
-    /// CAN message ID
-    pub id: u32,
-    
-    /// Byte offset within message
-    pub byte_offset: u8,
-    
-    /// Number of bytes
-    pub byte_length: u8,
-    
-    /// Little-endian byte order
-    pub little_endian: bool,
-    
-    /// Scale factor (raw_value * scale = engineering_units)
-    pub scale: f32,
-    
-    /// Offset (engineering_units = raw_value * scale + offset)
-    pub offset: f32,
-    
-    /// Engineering units
-    pub units: String,
-}
-
-/// Hardware-specific configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HardwareConfig {
-    /// PWM frequency for solenoid control (Hz)
-    pub pwm_frequency: u16,
-    
-    /// ADC reference voltage
-    pub adc_vref: f32,
-    
-    /// ADC resolution (bits)
-    pub adc_resolution: u8,
-    
-    /// Pressure sensor calibration
-    pub pressure_sensors: PressureSensorConfig,
-    
-    /// Display configuration
-    pub display: DisplayConfig,
-}
-
-/// Pressure sensor calibration parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PressureSensorConfig {
-    /// Voltage at 0 PSI
-    pub zero_pressure_voltage: f32,
-    
-    /// Voltage at full scale (30 PSI)
-    pub full_scale_voltage: f32,
-    
-    /// Full scale pressure in PSI
-    pub full_scale_pressure: f32,
-}
-
-/// Display configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DisplayConfig {
-    /// Screen width in pixels
-    pub width: u16,
-    
-    /// Screen height in pixels
-    pub height: u16,
-    
-    /// Default brightness (0-100%)
-    pub brightness: u8,
-    
-    /// Update rate in Hz
-    pub update_rate: u16,
+    /// Enable scramble button feature (temporary maximum aggression override)
+    pub scramble_enabled: bool,
 }
 
 impl Default for SystemConfig {
     fn default() -> Self {
-        let mut profiles = HashMap::new();
-        
-        // Valet profile - minimal boost for safety
-        profiles.insert("valet".to_string(), BoostProfile {
-            name: "Valet".to_string(),
-            description: "Minimal boost for inexperienced drivers".to_string(),
-            boost_targets: vec![
-                BoostPoint { rpm: 1000, boost_psi: 0.0 },
-                BoostPoint { rpm: 7000, boost_psi: 2.0 },
-            ],
-            max_boost: 2.0,
-            overboost_limit: 3.0,
-            overboost_hysteresis: 0.5,
-            pid_tuning: PidConfig {
-                kp: 0.3,
-                ki: 0.1,
-                kd: 0.0,
-                integral_limit: 5.0,
-            },
-        });
-        
-        // Daily profile - conservative for daily driving
-        profiles.insert("daily".to_string(), BoostProfile {
-            name: "Daily".to_string(),
-            description: "Conservative boost for daily driving".to_string(),
-            boost_targets: vec![
-                BoostPoint { rpm: 1500, boost_psi: 0.0 },
-                BoostPoint { rpm: 2500, boost_psi: 3.0 },
-                BoostPoint { rpm: 3500, boost_psi: 7.0 },
-                BoostPoint { rpm: 4000, boost_psi: 8.0 },
-                BoostPoint { rpm: 7000, boost_psi: 8.0 },
-            ],
-            max_boost: 8.0,
-            overboost_limit: 9.5,
-            overboost_hysteresis: 0.3,
-            pid_tuning: PidConfig {
-                kp: 0.45,
-                ki: 0.30,
-                kd: 0.0,
-                integral_limit: 10.0,
-            },
-        });
-        
-        // Aggressive profile - spirited driving
-        profiles.insert("aggressive".to_string(), BoostProfile {
-            name: "Aggressive".to_string(),
-            description: "Higher boost for spirited driving".to_string(),
-            boost_targets: vec![
-                BoostPoint { rpm: 1500, boost_psi: 0.0 },
-                BoostPoint { rpm: 2500, boost_psi: 4.0 },
-                BoostPoint { rpm: 3500, boost_psi: 9.0 },
-                BoostPoint { rpm: 4000, boost_psi: 10.0 },
-                BoostPoint { rpm: 7000, boost_psi: 10.0 },
-            ],
-            max_boost: 10.0,
-            overboost_limit: 11.5,
-            overboost_hysteresis: 0.3,
-            pid_tuning: PidConfig {
-                kp: 0.6,
-                ki: 0.35,
-                kd: 0.0,
-                integral_limit: 10.0,
-            },
-        });
-        
-        // Track profile - maximum performance
-        profiles.insert("track".to_string(), BoostProfile {
-            name: "Track".to_string(),
-            description: "Maximum safe boost for track use".to_string(),
-            boost_targets: vec![
-                BoostPoint { rpm: 1500, boost_psi: 0.0 },
-                BoostPoint { rpm: 2500, boost_psi: 5.0 },
-                BoostPoint { rpm: 3500, boost_psi: 11.0 },
-                BoostPoint { rpm: 4000, boost_psi: 12.0 },
-                BoostPoint { rpm: 7000, boost_psi: 12.0 },
-            ],
-            max_boost: 12.0,
-            overboost_limit: 13.5,
-            overboost_hysteresis: 0.3,
-            pid_tuning: PidConfig {
-                kp: 0.7,
-                ki: 0.4,
-                kd: 0.0,
-                integral_limit: 10.0,
-            },
-        });
-        
         Self {
-            spring_pressure: 5.0,
-            profiles,
-            active_profile: "daily".to_string(),
-            scramble_profile: "track".to_string(),
-            torque_target_percentage: 95.0,
-            boost_slew_rate: 5.0,
-            control_frequency: 100,
-            
-            safety: SafetyConfig {
-                global_overboost_limit: 15.0,
-                max_duty_change_per_cycle: 2.0,
-                max_rpm: 7500,
-                min_rpm_for_arming: 800,
-                sensor_ranges: SensorRanges {
-                    dome_input_pressure: (0.0, 25.0),
-                    upper_dome_pressure: (0.0, 25.0),
-                    manifold_pressure: (-15.0, 25.0), // Vacuum to boost
-                },
-                can_timeout_ms: 500,
-                max_loop_time_ms: 15,
-            },
-            
-            can: CanConfig {
-                bitrate: 500_000,
-                signals: CanSignalConfig {
-                    rpm: CanSignal {
-                        id: 0x201, // ⚠ SPECULATIVE - needs verification
-                        byte_offset: 0,
-                        byte_length: 2,
-                        little_endian: true,
-                        scale: 0.25,
-                        offset: 0.0,
-                        units: "RPM".to_string(),
-                    },
-                    map: CanSignal {
-                        id: 0x202, // ⚠ SPECULATIVE - needs verification
-                        byte_offset: 0,
-                        byte_length: 2,
-                        little_endian: true,
-                        scale: 0.1,
-                        offset: 0.0,
-                        units: "kPa".to_string(),
-                    },
-                    desired_torque: CanSignal {
-                        id: 0x203, // ⚠ SPECULATIVE - needs verification
-                        byte_offset: 0,
-                        byte_length: 2,
-                        little_endian: true,
-                        scale: 0.1,
-                        offset: -1000.0,
-                        units: "Nm".to_string(),
-                    },
-                    actual_torque: CanSignal {
-                        id: 0x204, // ⚠ SPECULATIVE - needs verification
-                        byte_offset: 0,
-                        byte_length: 2,
-                        little_endian: true,
-                        scale: 0.1,
-                        offset: -1000.0,
-                        units: "Nm".to_string(),
-                    },
-                    throttle_position: None, // Phase 2+
-                    drive_mode: None,       // Phase 2+
-                },
-            },
-            
-            hardware: HardwareConfig {
-                pwm_frequency: 30,
-                adc_vref: 3.3,      // Teensy 4.1 ADC reference
-                adc_resolution: 12,
-                pressure_sensors: PressureSensorConfig {
-                    zero_pressure_voltage: 0.167, // 0.5V * 0.333 (10kΩ+20kΩ divider)
-                    full_scale_voltage: 1.5,      // 4.5V * 0.333 (10kΩ+20kΩ divider)
-                    full_scale_pressure: 30.0,
-                },
-                display: DisplayConfig {
-                    width: 128,
-                    height: 160,
-                    brightness: 80,
-                    update_rate: 10,
-                },
-            },
+            aggression: 0.3,           // Conservative 30% for daily driving
+            spring_pressure: 5.0,      // Typical wastegate spring pressure
+            max_boost_psi: 12.0,       // Conservative boost ceiling
+            overboost_limit: 15.0,     // Hard safety limit
+            scramble_enabled: true,    // Enable scramble override
         }
-    }
-}
-
-impl BoostProfile {
-    /// Get boost target for specified RPM via linear interpolation
-    pub fn get_boost_target(&self, rpm: u16) -> f32 {
-        if self.boost_targets.is_empty() {
-            return 0.0;
-        }
-        
-        // Find surrounding points for interpolation
-        if rpm <= self.boost_targets[0].rpm {
-            return self.boost_targets[0].boost_psi;
-        }
-        
-        if rpm >= self.boost_targets.last().unwrap().rpm {
-            return self.boost_targets.last().unwrap().boost_psi;
-        }
-        
-        // Linear interpolation between points
-        for window in self.boost_targets.windows(2) {
-            if rpm >= window[0].rpm && rpm <= window[1].rpm {
-                let rpm_range = window[1].rpm - window[0].rpm;
-                let boost_range = window[1].boost_psi - window[0].boost_psi;
-                let rpm_offset = rpm - window[0].rpm;
-                
-                if rpm_range == 0 {
-                    return window[0].boost_psi;
-                }
-                
-                return window[0].boost_psi + (boost_range * rpm_offset as f32) / rpm_range as f32;
-            }
-        }
-        
-        0.0 // Should not reach here
     }
 }
 
 impl SystemConfig {
-    /// Get currently active boost profile
-    pub fn get_active_profile(&self) -> Option<&BoostProfile> {
-        self.profiles.get(&self.active_profile)
-    }
-    
-    /// Get scramble boost profile
-    pub fn get_scramble_profile(&self) -> Option<&BoostProfile> {
-        self.profiles.get(&self.scramble_profile)
-    }
-    
-    /// Validate configuration for consistency and safety
-    pub fn validate(&self) -> Result<(), String> {
+    /// Validate configuration parameters
+    /// 
+    /// 🔗 T4-CORE-012: Configuration Validation
+    /// Derived From: Safety.md parameter validation requirements
+    pub fn validate(&self) -> Result<(), CoreError> {
+        // Validate aggression range
+        if !(0.0..=1.0).contains(&self.aggression) {
+            return Err(CoreError::ConfigurationError(
+                format!("Aggression must be 0.0-1.0, got {}", self.aggression)
+            ));
+        }
+        
         // Validate spring pressure
-        if self.spring_pressure < 0.0 || self.spring_pressure > 20.0 {
-            return Err(format!("Invalid spring pressure: {} PSI", self.spring_pressure));
+        if self.spring_pressure < 1.0 || self.spring_pressure > 20.0 {
+            return Err(CoreError::ConfigurationError(
+                format!("Spring pressure must be 1.0-20.0 PSI, got {}", self.spring_pressure)
+            ));
         }
         
-        // Validate active profile exists
-        if !self.profiles.contains_key(&self.active_profile) {
-            return Err(format!("Active profile '{}' not found", self.active_profile));
+        // Validate max boost
+        if self.max_boost_psi < self.spring_pressure {
+            return Err(CoreError::ConfigurationError(
+                format!("Max boost ({} PSI) must be >= spring pressure ({} PSI)", 
+                    self.max_boost_psi, self.spring_pressure)
+            ));
         }
         
-        // Validate scramble profile exists
-        if !self.profiles.contains_key(&self.scramble_profile) {
-            return Err(format!("Scramble profile '{}' not found", self.scramble_profile));
+        if self.max_boost_psi > 25.0 {
+            return Err(CoreError::ConfigurationError(
+                format!("Max boost must be <= 25.0 PSI, got {}", self.max_boost_psi)
+            ));
         }
         
-        // Validate torque target percentage
-        if self.torque_target_percentage < 50.0 || self.torque_target_percentage > 100.0 {
-            return Err(format!("Invalid torque target percentage: {}%", self.torque_target_percentage));
+        // Validate overboost limit
+        if self.overboost_limit <= self.max_boost_psi {
+            return Err(CoreError::ConfigurationError(
+                format!("Overboost limit ({} PSI) must be > max boost ({} PSI)", 
+                    self.overboost_limit, self.max_boost_psi)
+            ));
         }
         
-        // Validate each profile
-        for (name, profile) in &self.profiles {
-            if let Err(e) = self.validate_profile(profile) {
-                return Err(format!("Profile '{}' invalid: {}", name, e));
-            }
+        if self.overboost_limit > 30.0 {
+            return Err(CoreError::ConfigurationError(
+                format!("Overboost limit must be <= 30.0 PSI, got {}", self.overboost_limit)
+            ));
         }
         
         Ok(())
     }
     
-    fn validate_profile(&self, profile: &BoostProfile) -> Result<(), String> {
-        // Check boost targets are sorted by RPM
-        for window in profile.boost_targets.windows(2) {
-            if window[1].rpm <= window[0].rpm {
-                return Err("Boost targets must be sorted by increasing RPM".to_string());
-            }
+    /// Get response characteristics derived from aggression setting
+    /// 
+    /// 🔗 T4-CORE-013: Aggression-Based Behavior Scaling
+    /// Derived From: T2-CONTROL-001 (Priority Hierarchy) + behavioral scaling requirements
+    /// All complex system behavior derived from single aggression parameter
+    pub fn get_response_characteristics(&self) -> ResponseProfile {
+        ResponseProfile {
+            // Tip-in sensitivity: how quickly system responds to torque requests
+            tip_in_sensitivity: self.aggression * 2.0,
+            
+            // Tip-out decay: how quickly system backs off when torque demand drops
+            tip_out_decay_rate: self.aggression * 0.5 + 0.2,
+            
+            // Torque following gain: amplification of ECU assistance
+            torque_following_gain: self.aggression * 1.5 + 0.3,
+            
+            // Boost ramp rate: maximum rate of boost pressure increase
+            boost_ramp_rate: self.aggression * 3.0 + 1.0,
+            
+            // Safety margin: how close to limits before backing off
+            safety_margin_factor: 1.0 - (self.aggression * 0.2),
+            
+            // PID aggressiveness: how hard PID controller pushes
+            pid_aggressiveness: self.aggression * 0.8 + 0.2,
+        }
+    }
+    
+    /// Get OFF behavior settings (aggression = 0.0)
+    /// 
+    /// 🔗 T4-CORE-014: OFF Mode Implementation
+    /// Derived From: T2-CONFIG-001 (0.0% OFF Requirement)
+    /// As close to naturally aspirated operation as physically possible
+    pub fn is_off_mode(&self) -> bool {
+        self.aggression == 0.0
+    }
+    
+    /// Get scramble behavior settings (temporary 100% aggression)
+    /// 
+    /// 🔗 T4-CORE-015: Scramble Mode Implementation
+    /// Derived From: Scramble override requirements
+    pub fn get_scramble_characteristics(&self) -> ResponseProfile {
+        if !self.scramble_enabled {
+            return self.get_response_characteristics();
         }
         
-        // Check boost values are reasonable
-        for point in &profile.boost_targets {
-            if point.boost_psi < 0.0 || point.boost_psi > self.safety.global_overboost_limit {
-                return Err(format!("Boost target {} PSI exceeds safety limit", point.boost_psi));
-            }
+        // Temporary maximum aggression override
+        ResponseProfile {
+            tip_in_sensitivity: 2.0,      // Maximum responsiveness
+            tip_out_decay_rate: 0.7,      // Fast decay when released
+            torque_following_gain: 1.8,   // Maximum ECU assistance
+            boost_ramp_rate: 4.0,         // Maximum ramp rate
+            safety_margin_factor: 0.8,    // Reduced safety margin
+            pid_aggressiveness: 1.0,      // Maximum PID aggression
+        }
+    }
+    
+    /// Update aggression setting with validation
+    /// 
+    /// Used for live adjustment via rotary encoder
+    pub fn set_aggression(&mut self, new_aggression: f32) -> Result<(), CoreError> {
+        if !(0.0..=1.0).contains(&new_aggression) {
+            return Err(CoreError::ConfigurationError(
+                format!("Aggression must be 0.0-1.0, got {}", new_aggression)
+            ));
         }
         
-        // Check overboost limit is above max boost
-        if profile.overboost_limit <= profile.max_boost {
-            return Err("Overboost limit must be above max boost".to_string());
-        }
-        
+        self.aggression = new_aggression;
         Ok(())
+    }
+    
+    /// Convert to JSON for storage
+    pub fn to_json(&self) -> Result<String, CoreError> {
+        serde_json::to_string_pretty(self)
+            .map_err(|e| CoreError::ConfigurationError(format!("JSON serialization failed: {}", e)))
+    }
+    
+    /// Load from JSON string
+    pub fn from_json(json: &str) -> Result<Self, CoreError> {
+        let config: SystemConfig = serde_json::from_str(json)
+            .map_err(|e| CoreError::ConfigurationError(format!("JSON parsing failed: {}", e)))?;
+        
+        config.validate()?;
+        Ok(config)
+    }
+}
+
+/// Response characteristics derived from aggression setting
+/// 
+/// 🔗 T4-CORE-016: Response Profile Implementation
+/// Derived From: Aggression scaling requirements + control behavior specification
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseProfile {
+    /// How quickly system responds to torque requests (0.0-2.0)
+    pub tip_in_sensitivity: f32,
+    
+    /// How quickly system backs off when demand drops (0.2-0.7)
+    pub tip_out_decay_rate: f32,
+    
+    /// Amplification factor for ECU torque assistance (0.3-1.8)
+    pub torque_following_gain: f32,
+    
+    /// Maximum boost ramp rate in PSI/second (1.0-4.0)
+    pub boost_ramp_rate: f32,
+    
+    /// Safety margin factor before backing off (0.8-1.0)
+    pub safety_margin_factor: f32,
+    
+    /// PID controller aggressiveness (0.2-1.0)
+    pub pid_aggressiveness: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_default_config_valid() {
+        let config = SystemConfig::default();
+        assert!(config.validate().is_ok());
+    }
+    
+    #[test]
+    fn test_aggression_validation() {
+        let mut config = SystemConfig::default();
+        
+        // Valid aggression values
+        assert!(config.set_aggression(0.0).is_ok());
+        assert!(config.set_aggression(0.5).is_ok());
+        assert!(config.set_aggression(1.0).is_ok());
+        
+        // Invalid aggression values
+        assert!(config.set_aggression(-0.1).is_err());
+        assert!(config.set_aggression(1.1).is_err());
+    }
+    
+    #[test]
+    fn test_boost_limit_validation() {
+        let mut config = SystemConfig::default();
+        
+        // Max boost must be >= spring pressure
+        config.spring_pressure = 10.0;
+        config.max_boost_psi = 5.0;
+        assert!(config.validate().is_err());
+        
+        // Overboost must be > max boost
+        config.max_boost_psi = 15.0;
+        config.overboost_limit = 10.0;
+        assert!(config.validate().is_err());
+    }
+    
+    #[test]
+    fn test_response_profile_scaling() {
+        let config = SystemConfig::default();
+        
+        // Test minimum aggression (0.0)
+        let mut config_min = config.clone();
+        config_min.aggression = 0.0;
+        let profile_min = config_min.get_response_characteristics();
+        
+        // Test maximum aggression (1.0) 
+        let mut config_max = config.clone();
+        config_max.aggression = 1.0;
+        let profile_max = config_max.get_response_characteristics();
+        
+        // Higher aggression should increase all response characteristics
+        assert!(profile_max.tip_in_sensitivity > profile_min.tip_in_sensitivity);
+        assert!(profile_max.torque_following_gain > profile_min.torque_following_gain);
+        assert!(profile_max.boost_ramp_rate > profile_min.boost_ramp_rate);
+    }
+    
+    #[test]
+    fn test_json_serialization() {
+        let config = SystemConfig::default();
+        let json = config.to_json().unwrap();
+        let deserialized = SystemConfig::from_json(&json).unwrap();
+        assert_eq!(config, deserialized);
     }
 }

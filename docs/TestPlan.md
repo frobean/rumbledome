@@ -1,549 +1,732 @@
 # RumbleDome Test Plan
 
-## Testing Strategy Overview
+📋 **Safety requirements reference**: See **[Safety.md](Safety.md)** for all SY-* safety requirements being validated  
+🏗️ **Implementation approach**: See **[Implementation.md](Implementation.md)** for testing architecture and framework  
+⚙️ **Technical specifications**: See **[TechnicalSpecs.md](TechnicalSpecs.md)** for hardware validation targets
 
-RumbleDome's testing strategy employs multiple validation layers to ensure safety-critical operation:
+## Testing Philosophy
 
-1. **Unit Testing**: Individual component validation with 100% safety path coverage
-2. **Integration Testing**: Desktop simulation with comprehensive scenarios  
-3. **Hardware-in-Loop (HIL)**: Real hardware validation with safety systems
-4. **System Validation**: Full vehicle integration testing
+**Safety-First Validation**: All safety-critical logic must achieve 100% test coverage through desktop simulation before any hardware integration. The HAL abstraction enables comprehensive testing without physical hardware risk.
 
-**Safety-First Approach**: All safety-critical functionality must be validated through automated testing before any hardware integration.
+**Progressive Validation Approach**:
+1. **Desktop Simulation** - Validate all control logic with zero hardware risk
+2. **CAN Signal Validation** - Verify Ford S550 signal interpretation with actual vehicle
+3. **Pneumatic Bench Testing** - Validate mechanical response times and safety systems
+4. **Vehicle Integration** - Full system validation in controlled environment
 
-## Unit Testing (rumbledome-core)
+## Unit Testing Framework (rumbledome-core)
 
-### Safety System Testing
+### Safety System Validation (SY-* Requirements)
 
-#### SY-001: Overboost Detection and Response
+#### SY-1: Pneumatic Fail-Safe Operation
 ```rust
 #[test]
-fn test_overboost_immediate_response() {
-    let mut core = setup_test_core();
+fn test_duty_zero_forces_wastegate_open() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
     
-    // Set manifold pressure above limit
-    core.inject_manifold_pressure(10.0); // Limit: 9.5 psi
-    
+    // Force duty cycle to 0%
+    core.hal.set_manifold_pressure(15.0);  // Above overboost limit
     core.execute_control_cycle().unwrap();
     
+    // Verify pneumatic fail-safe behavior
     assert_eq!(core.get_duty_cycle(), 0.0);
-    assert_eq!(core.get_state(), SystemState::OverboostCut);
-    assert!(core.get_response_time() < 100); // ms
+    assert!(core.hal.get_lower_dome_pressure() > core.hal.get_upper_dome_pressure());
+    assert_eq!(core.get_system_state(), SystemState::OverboostCut);
 }
 
 #[test]
-fn test_overboost_hysteresis() {
-    let mut core = setup_test_core();
-    core.set_overboost_limit(9.5, 0.3); // 9.5 psi limit, 0.3 hysteresis
+fn test_electronic_failure_defaults_to_safe_state() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
     
-    // Trigger overboost
-    core.inject_manifold_pressure(9.6);
-    core.execute_control_cycle().unwrap();
-    assert_eq!(core.get_state(), SystemState::OverboostCut);
+    // Simulate complete electronic failure
+    core.hal.inject_fault(HalError::SystemFailure);
     
-    // Drop below limit but above hysteresis threshold  
-    core.inject_manifold_pressure(9.3); // Above 9.2 (9.5-0.3)
-    core.execute_control_cycle().unwrap();
-    assert_eq!(core.get_state(), SystemState::OverboostCut); // Still cut
-    
-    // Drop below hysteresis threshold
-    core.inject_manifold_pressure(9.1); // Below 9.2
-    core.execute_control_cycle().unwrap();
-    assert_eq!(core.get_state(), SystemState::Armed); // Resume
+    let result = core.execute_control_cycle();
+    assert!(result.is_err());
+    assert_eq!(core.get_duty_cycle(), 0.0);  // Must default to safe state
 }
 ```
 
-#### SY-002: Fault Response Testing
+#### SY-2: High-Authority System Recognition  
 ```rust
 #[test]
-fn test_can_timeout_fault() {
-    let mut core = setup_test_core();
+fn test_conservative_duty_cycle_limits() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
     
-    // Simulate CAN timeout (no torque signals for 500ms)
-    core.simulate_can_timeout(600); // ms
-    
-    core.execute_control_cycle().unwrap();
-    
-    assert_eq!(core.get_duty_cycle(), 0.0);
-    assert_eq!(core.get_state(), SystemState::Fault(FaultCode::CanTimeout));
-}
-
-#[test]
-fn test_sensor_fault_detection() {
-    let mut core = setup_test_core();
-    
-    // Inject implausible sensor reading
-    core.inject_manifold_pressure(-5.0); // Negative pressure impossible
+    // Even aggressive settings should be conservative in duty cycle
+    core.set_aggression(1.0);  // Maximum aggression
+    core.hal.set_torque_signals(300.0, 200.0);  // Large torque gap
     
     core.execute_control_cycle().unwrap();
     
-    assert_eq!(core.get_duty_cycle(), 0.0);
-    assert_eq!(core.get_state(), SystemState::Fault(FaultCode::SensorImplausible));
+    // High-authority system: even max aggression should be conservative
+    assert!(core.get_duty_cycle() < 0.8);  // Never exceed 80% duty
+    assert!(core.get_estimated_boost_capability() < 15.0);  // Reasonable boost estimate
 }
 ```
 
-### ECU Cooperation Testing
-
-#### EC-001: Torque Ceiling Enforcement
+#### SY-3: Overboost Response Validation
 ```rust
-#[test] 
-fn test_torque_ceiling_respect() {
-    let mut core = setup_test_core();
-    core.set_torque_target_percentage(95.0);
+#[test]
+fn test_overboost_response_time() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
     
-    // ECU requests 200 Nm max, actual is 190 Nm
-    core.inject_torque_signals(200.0, 190.0);
-    
-    // Target should be 95% of 200 = 190 Nm (already achieved)
-    let torque_target = core.calculate_torque_target();
-    assert_eq!(torque_target, 190.0);
-    
-    // Should not increase duty cycle significantly
+    // Set normal operation
+    core.hal.set_manifold_pressure(5.0);
     core.execute_control_cycle().unwrap();
-    assert!(core.get_duty_cycle() < 5.0); // Minimal adjustment
+    assert!(core.get_duty_cycle() > 0.0);
+    
+    // Trigger overboost condition
+    let start_time = core.hal.get_time_ms();
+    core.hal.set_manifold_pressure(16.0);  // Above overboost limit
+    core.execute_control_cycle().unwrap();
+    let response_time = core.hal.get_time_ms() - start_time;
+    
+    // Verify immediate response (SY-3)
+    assert_eq!(core.get_duty_cycle(), 0.0);
+    assert!(response_time < 100);  // <100ms response requirement
+    assert_eq!(core.get_system_state(), SystemState::OverboostCut);
 }
 
 #[test]
-fn test_torque_undershoot_response() {
-    let mut core = setup_test_core();
-    core.set_torque_target_percentage(95.0);
+fn test_user_configurable_overboost_limits() {
+    let mut hal = MockHal::new();
     
-    // ECU can handle 200 Nm, actual is only 150 Nm
-    core.inject_torque_signals(200.0, 150.0);
-    
-    let torque_target = core.calculate_torque_target();
-    assert_eq!(torque_target, 190.0); // 95% of 200
-    
-    // Should increase duty cycle to achieve more boost
-    core.execute_control_cycle().unwrap();
-    assert!(core.get_duty_cycle() > 10.0);
-}
-
-#[test]
-fn test_torque_overshoot_prevention() {
-    let mut core = setup_test_core();
-    
-    // Actual torque approaching ceiling
-    core.inject_torque_signals(200.0, 198.0); // Very close to ceiling
-    
-    core.execute_control_cycle().unwrap();
-    
-    // Should reduce duty cycle to prevent ECU intervention
-    assert!(core.get_duty_cycle() < core.get_previous_duty_cycle());
+    // Test different user-configured overboost limits
+    for overboost_limit in [12.0, 15.0, 18.0] {
+        let config = SystemConfig {
+            overboost_limit,
+            ..test_config()
+        };
+        let mut core = RumbleDomeCore::new(MockHal::new(), config);
+        
+        // Should not trigger below limit
+        core.hal.set_manifold_pressure(overboost_limit - 0.1);
+        core.execute_control_cycle().unwrap();
+        assert_ne!(core.get_system_state(), SystemState::OverboostCut);
+        
+        // Should trigger at limit
+        core.hal.set_manifold_pressure(overboost_limit + 0.1);
+        core.execute_control_cycle().unwrap();
+        assert_eq!(core.get_system_state(), SystemState::OverboostCut);
+    }
 }
 ```
 
-### Auto-Calibration Testing
-
-#### AC-001: Progressive Safety Calibration
+#### SY-4: Progressive Calibration Safety
 ```rust
 #[test]
-fn test_progressive_calibration_start() {
-    let mut core = setup_test_core();
-    core.set_spring_pressure(5.0);
+fn test_calibration_starts_conservative() {
+    let mut hal = MockHal::new();
+    let config = SystemConfig {
+        spring_pressure: 5.0,
+        overboost_limit: 15.0,
+        ..test_config()
+    };
+    let mut core = RumbleDomeCore::new(hal, config);
     
-    core.start_calibration(4000, 8.0).unwrap(); // Target: 4000 RPM, 8.0 psi
+    core.start_calibration_session().unwrap();
     
-    // Should start with conservative overboost limit
-    assert_eq!(core.get_current_overboost_limit(), 6.0); // Spring + 1
-    assert_eq!(core.get_calibration_state(), CalibrationState::Conservative);
+    // Should start at spring + 1 PSI
+    let initial_limit = core.get_current_overboost_limit();
+    assert_eq!(initial_limit, 6.0);  // 5.0 + 1.0
+    
+    // Should only increase after proving safety
+    for _ in 0..2 {  // Not enough runs yet
+        core.process_calibration_run(successful_run()).unwrap();
+    }
+    assert_eq!(core.get_current_overboost_limit(), 6.0);  // Still conservative
+    
+    // After sufficient validation runs
+    core.process_calibration_run(successful_run()).unwrap();
+    assert!(core.get_current_overboost_limit() > 6.0);  // Now can increase
+}
+```
+
+#### SY-5: No Raw Duty Cycle Configuration
+```rust
+#[test]
+fn test_no_user_duty_cycle_access() {
+    let config = SystemConfig::default();
+    
+    // Configuration should only expose PSI/kPa values
+    assert!(config.max_boost_psi > 0.0);
+    assert!(config.overboost_limit > 0.0);
+    assert!(config.spring_pressure > 0.0);
+    
+    // Should not expose any raw duty cycle parameters
+    // This is a compile-time test - if these fields exist, compilation fails
+    // assert!(config.target_duty_cycle);  // Should not compile
+    // assert!(config.calibration_duty);   // Should not compile
+}
+```
+
+#### SY-6: Torque Ceiling Enforcement
+```rust
+#[test]
+fn test_torque_ceiling_respected() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
+    
+    // Set desired torque and actual torque at ceiling (95%)
+    let desired_torque = 200.0;
+    let torque_ceiling = desired_torque * 0.95;  // 95% ceiling
+    core.hal.set_torque_signals(desired_torque, torque_ceiling);
+    
+    core.execute_control_cycle().unwrap();
+    
+    // Should provide minimal assistance when at ceiling
+    assert!(core.get_duty_cycle() < 0.2);
+    
+    // When exceeding ceiling, should back off
+    core.hal.set_torque_signals(desired_torque, torque_ceiling + 5.0);
+    core.execute_control_cycle().unwrap();
+    
+    // Should reduce boost assistance
+    assert!(core.get_duty_cycle() < 0.1);
+}
+```
+
+### Torque-Following Control Logic
+
+#### Core Torque Gap Analysis
+```rust
+#[test]
+fn test_torque_gap_calculation() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
+    
+    // Test various torque gap scenarios
+    let test_cases = [
+        (200.0, 200.0, 0.0),    // No gap - minimal assistance
+        (200.0, 190.0, 10.0),   // Small gap - some assistance  
+        (200.0, 170.0, 30.0),   // Large gap - significant assistance
+        (200.0, 210.0, -10.0),  // Negative gap - reduce assistance
+    ];
+    
+    for (desired, actual, expected_gap) in test_cases {
+        core.hal.set_torque_signals(desired, actual);
+        core.execute_control_cycle().unwrap();
+        
+        let calculated_gap = core.get_current_torque_gap();
+        assert_eq!(calculated_gap, expected_gap);
+        
+        // Assistance should correlate with gap size
+        let duty = core.get_duty_cycle();
+        if expected_gap > 15.0 {
+            assert!(duty > 0.3);  // Significant assistance
+        } else if expected_gap < 5.0 {
+            assert!(duty < 0.2);  // Minimal assistance
+        }
+    }
 }
 
 #[test]
-fn test_calibration_confidence_building() {
-    let mut core = setup_test_core();
-    core.start_calibration(4000, 8.0).unwrap();
+fn test_ecu_cooperation_behavior() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
     
-    // Simulate 5 consistent calibration runs
-    for run in 0..5 {
-        let result = simulate_calibration_run(&mut core, 4000, 8.0, 23.5); // Consistent duty
-        core.process_calibration_result(result).unwrap();
+    // ECU successfully achieving torque target
+    core.hal.set_torque_signals(200.0, 195.0);  // 5 Nm gap - acceptable
+    core.execute_control_cycle().unwrap();
+    let baseline_duty = core.get_duty_cycle();
+    assert!(baseline_duty < 0.3);  // Minimal assistance when ECU succeeding
+    
+    // ECU struggling with torque delivery
+    core.hal.set_torque_signals(200.0, 175.0);  // 25 Nm gap - ECU needs help
+    core.execute_control_cycle().unwrap();
+    let assistance_duty = core.get_duty_cycle();
+    assert!(assistance_duty > baseline_duty);  // Increased assistance
+    
+    // ECU returns to successful operation  
+    core.hal.set_torque_signals(200.0, 195.0);
+    core.execute_control_cycle().unwrap();
+    // Should gradually return to minimal assistance (not instant)
+    assert!(core.get_duty_cycle() < assistance_duty);
+}
+```
+
+#### Aggression Scaling Behavior
+```rust
+#[test]
+fn test_aggression_scaling_characteristics() {
+    let mut hal = MockHal::new();
+    
+    // Test different aggression levels with same torque scenario
+    let torque_scenarios = [(200.0, 175.0)];  // 25 Nm gap
+    let aggression_levels = [0.2, 0.5, 0.8];
+    
+    for &(desired, actual) in &torque_scenarios {
+        let mut previous_duty = 0.0;
+        
+        for &aggression in &aggression_levels {
+            let config = SystemConfig {
+                aggression,
+                ..test_config()
+            };
+            let mut core = RumbleDomeCore::new(MockHal::new(), config);
+            core.hal.set_torque_signals(desired, actual);
+            
+            core.execute_control_cycle().unwrap();
+            let duty = core.get_duty_cycle();
+            
+            // Higher aggression should result in higher duty cycle response
+            assert!(duty > previous_duty);
+            previous_duty = duty;
+        }
+    }
+}
+```
+
+### Learning System Validation
+
+#### Duty Cycle Calibration Learning
+```rust
+#[test]
+fn test_duty_cycle_learning_convergence() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
+    
+    // Simulate repeated operation at specific RPM/boost point
+    let target_rpm = 4000;
+    let target_boost = 8.0;
+    
+    // Initially no learned data
+    assert!(core.get_learned_duty(target_rpm, target_boost).is_err());
+    
+    // Run multiple learning cycles
+    for cycle in 0..10 {
+        core.hal.set_rpm(target_rpm);
+        core.hal.set_manifold_pressure(target_boost);
+        core.hal.set_torque_signals(250.0, 240.0);  // Consistent torque gap
+        
+        core.execute_control_cycle().unwrap();
+        
+        // Learning should converge over time
+        if cycle > 5 {
+            let learned_duty = core.get_learned_duty(target_rpm, target_boost).unwrap();
+            assert!(learned_duty > 0.0);
+            assert!(learned_duty < 1.0);
+        }
+    }
+}
+
+#[test]  
+fn test_environmental_compensation_learning() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
+    
+    // Establish baseline at standard conditions
+    for _ in 0..5 {
+        core.hal.set_environmental_conditions(20.0, 1013.25, 50.0);  // 20°C, sea level, 50% humidity
+        core.execute_learning_cycle().unwrap();
+    }
+    let baseline_duty = core.get_learned_duty(4000, 8.0).unwrap();
+    
+    // Change environmental conditions
+    for _ in 0..5 {
+        core.hal.set_environmental_conditions(5.0, 900.0, 80.0);  // Cold, high altitude, humid
+        core.execute_learning_cycle().unwrap();
+    }
+    let compensated_duty = core.get_learned_duty(4000, 8.0).unwrap();
+    
+    // Should learn environmental compensation
+    assert_ne!(baseline_duty, compensated_duty);
+    assert!(core.get_environmental_compensation_factor() != 1.0);
+}
+```
+
+#### SY-11: Learning System Bounds
+```rust
+#[test]
+fn test_learning_bounds_enforcement() {
+    let mut hal = MockHal::new();
+    let mut core = RumbleDomeCore::new(hal, test_config());
+    
+    // Establish baseline
+    let baseline_duty = 0.5;
+    core.set_learned_baseline(4000, 8.0, baseline_duty);
+    
+    // Try to learn extreme adjustment
+    for _ in 0..100 {  // Many learning cycles
+        core.inject_extreme_learning_condition();
+        core.execute_control_cycle().unwrap();
     }
     
-    // Should advance to progressive phase
-    assert_eq!(core.get_calibration_state(), CalibrationState::Progressive);
-    assert!(core.get_current_overboost_limit() > 6.0);
-}
-
-#[test]
-fn test_calibration_safety_bounds() {
-    let mut core = setup_test_core();
-    core.start_calibration(4000, 8.0).unwrap();
+    // Should be bounded to ±20% maximum from baseline
+    let final_duty = core.get_learned_duty(4000, 8.0).unwrap();
+    assert!(final_duty >= baseline_duty * 0.8);
+    assert!(final_duty <= baseline_duty * 1.2);
     
-    // Simulate dangerous duty cycle result
-    let dangerous_result = CalibrationRunResult {
-        duty_cycle: 50.0, // Unreasonably high
-        achieved_boost: 12.0, // Way over target
-        response_time: 200, // Slow response
+    // Slew rate limiting should prevent rapid changes
+    assert!(core.get_max_learning_rate_per_hour() <= 0.05);  // ±5% per hour max
+}
+```
+
+### Configuration System Testing
+
+#### 5-Parameter Configuration Model
+```rust
+#[test]
+fn test_complete_configuration_model() {
+    let config = SystemConfig {
+        aggression: 0.7,
+        spring_pressure: 5.0,
+        max_boost_psi: 9.0,
+        overboost_limit: 15.0,
+        scramble_enabled: true,
     };
     
-    // Should reject dangerous result and abort calibration
-    assert!(core.process_calibration_result(dangerous_result).is_err());
-    assert_eq!(core.get_calibration_state(), CalibrationState::Aborted);
+    // All behavior should be derivable from these 5 parameters
+    let response_profile = config.get_response_characteristics();
+    
+    assert!(response_profile.tip_in_sensitivity > 0.0);
+    assert!(response_profile.tip_out_decay_rate < 1.0);
+    assert!(response_profile.torque_following_gain > 0.0);
+    assert!(response_profile.boost_ramp_rate > 0.0);
+    
+    // Aggression should scale all parameters
+    assert!(response_profile.tip_in_sensitivity > config.aggression * 0.01);
+    assert!(response_profile.boost_ramp_rate > config.aggression * 1.0);
+}
+
+#[test]
+fn test_scramble_button_override() {
+    let mut hal = MockHal::new();
+    let config = SystemConfig {
+        aggression: 0.3,  // Conservative setting
+        scramble_enabled: true,
+        ..test_config()
+    };
+    let mut core = RumbleDomeCore::new(hal, config);
+    
+    // Normal operation with low aggression
+    core.hal.set_torque_signals(200.0, 175.0);
+    core.execute_control_cycle().unwrap();
+    let normal_duty = core.get_duty_cycle();
+    
+    // Scramble button activated
+    core.hal.set_scramble_button(true);
+    core.execute_control_cycle().unwrap();
+    let scramble_duty = core.get_duty_cycle();
+    
+    // Should behave like 100% aggression regardless of knob setting
+    assert!(scramble_duty > normal_duty);
+    
+    // Scramble button released
+    core.hal.set_scramble_button(false);
+    core.execute_control_cycle().unwrap();
+    
+    // Should return to normal aggression behavior
+    assert!(core.get_duty_cycle() < scramble_duty);
 }
 ```
 
-### Learning System Testing
+## Integration Testing (Desktop Simulation)
 
-#### LS-001: Duty Cycle Learning
+### Test Scenario Framework
+
 ```rust
-#[test]
-fn test_duty_cycle_learning_bounds() {
-    let mut core = setup_test_core();
-    
-    // Start with baseline duty cycle
-    let initial_duty = core.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Simulate learning scenario - slight undershoot
-    for _ in 0..100 {
-        core.inject_scenario(4000, 8.0, 7.8); // Slight undershoot
-        core.execute_control_cycle().unwrap();
+// rumbledome-sim/src/scenarios/
+pub struct TestScenario {
+    pub name: String,
+    pub vehicle_model: VehicleSimulation,
+    pub environmental_conditions: EnvironmentalSim,
+    pub failure_injection: FailureInjection,
+    pub expected_outcomes: ExpectedResults,
+}
+
+impl TestScenario {
+    pub fn aggressive_acceleration_test() -> Self {
+        Self {
+            name: "Aggressive Acceleration - High Aggression".to_string(),
+            vehicle_model: VehicleSimulation::stock_s550_gt(),
+            environmental_conditions: EnvironmentalSim::standard_conditions(),
+            failure_injection: FailureInjection::none(),
+            expected_outcomes: ExpectedResults {
+                max_boost_achieved: Some(8.5),
+                overboost_violations: 0,
+                max_response_time_ms: 100,
+                ecu_cooperation_score: 0.9,
+            },
+        }
     }
     
-    let learned_duty = core.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Should learn slightly higher duty, but within bounds
-    assert!(learned_duty > initial_duty);
-    assert!(learned_duty - initial_duty < 5.0); // Max 5% change
-}
-
-#[test]
-fn test_learning_slew_rate_limits() {
-    let mut core = setup_test_core();
-    core.set_learning_slew_rate(1.0); // 1% per second max
-    
-    let initial_duty = core.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Try to force rapid learning change
-    for _ in 0..10 { // 10 cycles at 100Hz = 0.1 seconds
-        core.inject_rapid_change_scenario();
-        core.execute_control_cycle().unwrap();
+    pub fn safety_fault_injection_test() -> Self {
+        Self {
+            name: "Safety Response - Multiple Fault Injection".to_string(),
+            vehicle_model: VehicleSimulation::stock_s550_gt(),
+            environmental_conditions: EnvironmentalSim::standard_conditions(),
+            failure_injection: FailureInjection::multiple([
+                FaultType::CanTimeout(300),
+                FaultType::SensorFailure(SensorId::ManifoldPressure),
+                FaultType::OverboostCondition(12.0),
+            ]),
+            expected_outcomes: ExpectedResults {
+                system_enters_safe_state: true,
+                fault_detection_time_ms: Some(100),
+                recovery_possible: false,
+            },
+        }
     }
-    
-    let learned_duty = core.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Should be slew-rate limited to ~0.1% change (0.1s * 1%/s)
-    assert!((learned_duty - initial_duty).abs() < 0.2);
 }
 ```
 
-### Pneumatic System Testing
+### Comprehensive Integration Scenarios
 
-#### PS-001: Pressure Sensor Validation
+#### Normal Operation Validation
 ```rust
 #[test]
-fn test_pressure_sensor_scaling() {
-    // Test 0-30 psi with 10kΩ+20kΩ voltage divider (0.333 ratio): 0.167-1.5V
-    assert_eq!(scale_pressure_mv(167), 0.0);   // 0.167V = 0 psi
-    assert_eq!(scale_pressure_mv(835), 15.0);  // 0.835V = 15 psi  
-    assert_eq!(scale_pressure_mv(1500), 30.0); // 1.5V = 30 psi
+fn test_complete_drive_cycle_simulation() {
+    let scenario = TestScenario::complete_drive_cycle();
+    let mut sim = DesktopSimulator::new(scenario);
     
-    // Test bounds
-    assert_eq!(scale_pressure_mv(150), 0.0);   // Below 0.167V clamped
-    assert_eq!(scale_pressure_mv(1600), 30.0); // Above 1.5V clamped
+    let result = sim.run_full_simulation(Duration::from_secs(300)).unwrap();
+    
+    // Verify comprehensive operation
+    assert!(result.total_boost_cycles > 50);
+    assert_eq!(result.safety_violations, 0);
+    assert!(result.avg_torque_gap < 15.0);  // Good ECU cooperation
+    assert!(result.fuel_economy_impact < 5.0);  // Minimal efficiency impact
 }
 
 #[test]
-fn test_pneumatic_optimization() {
-    let mut optimizer = PneumaticOptimizer::new();
+fn test_environmental_variation_handling() {
+    let scenarios = [
+        EnvironmentalSim::hot_day(40.0),      // 40°C
+        EnvironmentalSim::cold_morning(-10.0), // -10°C
+        EnvironmentalSim::high_altitude(2000.0), // 2000m elevation
+        EnvironmentalSim::humid_conditions(95.0), // 95% humidity
+    ];
     
-    // Test optimal pressure calculation
-    let recommendation = optimizer.recommend_input_pressure(
-        9.5,  // max_boost_target
-        5.0,  // spring_pressure
-        20.0, // current_duty_usage_low
-        70.0  // current_duty_usage_high
-    );
-    
-    assert!(recommendation.recommended_psi > 10.0);
-    assert!(recommendation.recommended_psi < 20.0);
-    assert_eq!(recommendation.rationale, "Optimal for 20-70% duty cycle range");
+    for env_condition in scenarios {
+        let mut scenario = TestScenario::steady_state_cruise();
+        scenario.environmental_conditions = env_condition;
+        
+        let mut sim = DesktopSimulator::new(scenario);
+        let result = sim.run_simulation(Duration::from_secs(60)).unwrap();
+        
+        // System should adapt to all environmental conditions
+        assert_eq!(result.safety_violations, 0);
+        assert!(result.environmental_compensation_active);
+        assert!(result.boost_consistency_score > 0.8);
+    }
 }
 ```
 
-## Integration Testing (rumbledome-sim)
-
-### Comprehensive Scenario Testing
-
-#### IS-001: Complete System Scenarios
+#### Safety System Integration Testing
 ```rust
 #[test]
-fn test_full_driving_scenario() {
-    let mut sim = RumbledomeSim::new();
-    sim.load_scenario("highway_acceleration.json");
+fn test_all_safety_requirements_integration() {
+    // Test every SY-* requirement in integrated environment
+    let safety_scenarios = [
+        TestScenario::pneumatic_failsafe_test(),        // SY-1
+        TestScenario::high_authority_recognition_test(), // SY-2  
+        TestScenario::overboost_response_test(),         // SY-3
+        TestScenario::progressive_calibration_test(),    // SY-4
+        TestScenario::torque_ceiling_test(),            // SY-6
+        TestScenario::learning_bounds_test(),           // SY-11
+        // ... all other SY-* requirements
+    ];
     
-    // Simulate 30-second acceleration scenario
-    sim.run_scenario_duration(Duration::from_secs(30));
-    
-    let results = sim.get_results();
-    
-    // Validate system behavior
-    assert!(results.max_boost < 9.5); // Never exceeded limit
-    assert!(results.ecu_interventions == 0); // No harsh ECU responses
-    assert!(results.boost_consistency > 0.9); // Consistent response
-    assert!(results.torque_delivery_smoothness > 0.85);
+    for scenario in safety_scenarios {
+        let mut sim = DesktopSimulator::new(scenario);
+        let result = sim.run_simulation(Duration::from_secs(30)).unwrap();
+        
+        // Every safety requirement must pass
+        assert!(result.safety_requirement_passed);
+        assert_eq!(result.safety_violations, 0);
+        assert!(result.response_time_ms < 100);
+    }
 }
+```
 
+## CAN Signal Validation Testing
+
+### Ford S550 Signal Interpretation Tests
+
+```rust
+// Tests to run with actual vehicle CAN data
 #[test] 
-fn test_calibration_sequence() {
-    let mut sim = RumbledomeSim::new();
-    sim.load_scenario("dyno_calibration.json");
+fn test_can_signal_decoding_accuracy() {
+    let mut can_interface = FordS550Can::new();
     
-    // Start calibration at 4000 RPM, 8.0 PSI target
-    sim.start_calibration(4000, 8.0);
-    
-    // Run 5 WOT pulls with progressive limits
-    for pull in 0..5 {
-        sim.execute_wot_pull(Duration::from_secs(15));
-        assert!(sim.get_overboost_limit() >= 6.0); // Progressive increase
+    // RPM signal validation (0x109)
+    let rpm_readings = can_interface.collect_rpm_samples(100);
+    for rpm in rpm_readings {
+        assert!(rpm > 500);   // Reasonable idle RPM
+        assert!(rpm < 8000);  // Reasonable max RPM
     }
     
-    // Verify successful calibration
-    assert!(sim.get_calibration_state() == CalibrationState::Complete);
-    assert!(sim.get_learned_duty(4000, 8.0).is_some());
-}
-```
-
-#### IS-002: Fault Injection Testing
-```rust
-#[test]
-fn test_sensor_failure_scenarios() {
-    let mut sim = RumbledomeSim::new();
-    
-    // Simulate manifold sensor failure during boost
-    sim.run_duration(Duration::from_secs(5)); // Normal operation
-    sim.inject_sensor_failure(SensorType::Manifold);
-    sim.run_duration(Duration::from_secs(2));
-    
-    // System should immediately go to fault state
-    assert_eq!(sim.get_system_state(), SystemState::Fault(FaultCode::SensorFailure));
-    assert_eq!(sim.get_duty_cycle(), 0.0);
+    // Manifold pressure signal validation (0x167 bytes 5-6)
+    let map_readings = can_interface.collect_map_samples(100);
+    for map_psi in map_readings {
+        assert!(map_psi > -15.0);  // Reasonable vacuum limit
+        assert!(map_psi < 30.0);   // Reasonable boost limit
+    }
 }
 
 #[test]
-fn test_can_bus_failure_recovery() {
-    let mut sim = RumbledomeSim::new();
+fn test_torque_signal_behavioral_analysis() {
+    // This test requires actual vehicle operation
+    let mut can_interface = FordS550Can::new();
     
-    // Normal operation then CAN failure
-    sim.run_duration(Duration::from_secs(5));
-    sim.inject_can_failure();
-    sim.run_duration(Duration::from_secs(1));
+    // Record signals during acceleration event
+    let test_data = can_interface.record_acceleration_event(Duration::from_secs(10));
     
-    // Should be in fault state
-    assert_eq!(sim.get_system_state(), SystemState::Fault(FaultCode::CanTimeout));
+    let signal_a_data = test_data.signal_0x167_torque;  // "Engine load/torque"
+    let signal_b_data = test_data.signal_0x43e_load;    // "Engine load percentage"
     
-    // Restore CAN and verify recovery
-    sim.restore_can();
-    sim.run_duration(Duration::from_secs(2));
+    // Behavioral analysis to determine desired vs actual
+    let (a_leads_b, b_leads_a) = analyze_signal_timing(signal_a_data, signal_b_data);
     
-    // Should require manual fault acknowledgment
-    assert_eq!(sim.get_system_state(), SystemState::Fault(FaultCode::CanTimeout));
+    if a_leads_b {
+        println!("0x167 appears to be desired torque (leads 0x43E)");
+    } else if b_leads_a {
+        println!("0x43E appears to be desired torque (leads 0x167)");
+    } else {
+        println!("Signals show no clear leader/follower relationship");
+    }
     
-    sim.acknowledge_fault();
-    sim.run_duration(Duration::from_secs(1));
-    
-    assert_eq!(sim.get_system_state(), SystemState::Armed);
-}
-```
-
-#### IS-003: Safety System Integration Testing
-```rust
-#[test]
-fn test_traction_control_integration() {
-    let mut sim = RumbledomeSim::new();
-    
-    // Simulate high torque request during normal acceleration
-    sim.inject_torque_signals(250.0, 200.0); // ECU wants 250 Nm
-    sim.run_duration(Duration::from_millis(500));
-    let normal_duty = sim.get_duty_cycle();
-    
-    // Simulate traction control activation (desired torque drops)
-    sim.inject_torque_signals(150.0, 200.0); // TC drops desired to 150 Nm
-    sim.run_duration(Duration::from_millis(100));
-    
-    // Should immediately reduce boost to help ECU reduce torque
-    assert!(sim.get_duty_cycle() < normal_duty);
-    assert_eq!(sim.get_system_state(), SystemState::Armed); // No fault
+    // Cross-reference with HPTuners data if available
+    if let Some(hptuners_data) = test_data.hptuners_reference {
+        let correlation_a = correlate_signals(signal_a_data, hptuners_data.desired_torque);
+        let correlation_b = correlate_signals(signal_b_data, hptuners_data.desired_torque);
+        
+        assert!(correlation_a > 0.8 || correlation_b > 0.8);  // One should correlate strongly
+    }
 }
 
 #[test]
-fn test_abs_integration() {
-    let mut sim = RumbledomeSim::new();
+fn test_can_message_update_frequencies() {
+    let mut can_interface = FordS550Can::new();
     
-    // Normal braking scenario with some boost
-    sim.inject_torque_signals(180.0, 180.0); // Balanced
-    sim.run_duration(Duration::from_millis(500));
+    let frequency_test = can_interface.measure_message_frequencies(Duration::from_secs(5));
     
-    // ABS activation - ECU drastically reduces desired torque
-    sim.inject_torque_signals(50.0, 180.0); // ABS drops desired torque
-    sim.run_duration(Duration::from_millis(50));
+    // Verify control loop requirements
+    assert!(frequency_test.rpm_frequency_hz >= 20.0);
+    assert!(frequency_test.torque_frequency_hz >= 20.0);  
+    assert!(frequency_test.map_frequency_hz >= 20.0);
     
-    // Should quickly reduce boost to help ECU cut torque
-    assert!(sim.get_duty_cycle() < 10.0);
-    assert_eq!(sim.get_system_state(), SystemState::Armed);
-}
-
-#[test]
-fn test_rapid_profile_switching() {
-    let mut sim = RumbledomeSim::new();
-    
-    // Rapidly switch between profiles during boost
-    sim.set_profile("Daily");
-    sim.run_duration(Duration::from_millis(100));
-    
-    sim.set_profile("Aggressive");
-    sim.run_duration(Duration::from_millis(100));
-    
-    sim.set_profile("Valet");
-    sim.run_duration(Duration::from_millis(100));
-    
-    // System should handle gracefully without faults
-    assert_ne!(sim.get_system_state(), SystemState::Fault(_));
-    assert!(sim.get_duty_cycle() >= 0.0);
-}
-
-#[test]
-fn test_environmental_compensation() {
-    let mut sim = RumbledomeSim::new();
-    
-    // Baseline calibration at sea level, 70°F
-    sim.set_environmental_conditions(0, 70.0); // altitude_ft, temp_f
-    sim.calibrate_point(4000, 8.0);
-    let baseline_duty = sim.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Test high altitude compensation
-    sim.set_environmental_conditions(5000, 70.0);
-    sim.run_duration(Duration::from_secs(10));
-    let altitude_duty = sim.get_learned_duty(4000, 8.0).unwrap();
-    
-    // Should require higher duty cycle at altitude
-    assert!(altitude_duty > baseline_duty);
-    assert!(altitude_duty - baseline_duty < 10.0); // Bounded compensation
+    // Verify consistent timing
+    assert!(frequency_test.rpm_jitter_ms < 10.0);
+    assert!(frequency_test.torque_jitter_ms < 10.0);
 }
 ```
 
 ## Hardware-in-Loop (HIL) Testing
 
-### HIL-001: Pneumatic System Validation
+### Pneumatic System Validation
 
-#### Real Solenoid Response Testing
-```
-Test Equipment:
-- 4-port MAC solenoid valve  
-- Compressed air supply (regulated to test pressures)
-- Pressure measurement equipment
-- Teensy 4.1 with production firmware
+```rust
+#[test]
+fn test_actual_pneumatic_response_times() {
+    let mut hil = HardwareInLoopTestRig::new();
+    
+    // Test SY-3: Overboost response time validation
+    hil.set_manifold_pressure(5.0);  // Normal operation
+    hil.set_duty_cycle(0.5);          // 50% duty
+    std::thread::sleep(Duration::from_millis(100));  // Settle
+    
+    let start_time = hil.get_timestamp_us();
+    hil.trigger_overboost_condition(12.0);  // Above limit
+    
+    // Measure actual pneumatic response
+    let response_time = hil.measure_wastegate_opening_time();
+    
+    assert!(response_time < 100_000);  // <100ms requirement (microseconds)
+    assert!(hil.wastegate_fully_open());
+}
 
-Test Procedure:
-1. Measure actual overboost response times at various input pressures
-2. Validate duty cycle linearity and accuracy
-3. Confirm pressure sensor calibration accuracy
-4. Test pneumatic system optimization recommendations
-
-Pass Criteria:
-- Overboost response < 100ms for recommended input pressures
-- Duty cycle accuracy within ±1%
-- Pressure sensor accuracy within ±0.25% full scale
-- System recommendations result in measurable improvements
-```
-
-#### HIL-002: CAN Bus Integration Testing
-```
-Test Equipment:
-- Ford Gen2 Coyote ECU or CAN simulator
-- Production wiring harness
-- CAN bus analyzer
-
-Test Procedure:
-1. Verify CAN message reception and parsing
-2. Test ECU cooperation - no harsh interventions
-3. Validate fault detection for CAN timeouts
-4. Test message filtering and processing performance
-
-Pass Criteria:
-- 100% message reception rate at 500 kbps
-- Zero ECU spark cuts or fuel cuts during normal operation  
-- CAN timeout detection within 500ms
-- <10ms latency from CAN message to control action
-```
-
-### HIL-003: Safety System Validation
-
-#### Emergency Response Testing
-```
-Test Procedure:
-1. Induce actual overboost condition with controlled setup
-2. Measure response time from detection to wastegate opening
-3. Test multiple failure scenarios (sensor, power, communication)
-4. Validate fault reporting and logging accuracy
-
-Pass Criteria:
-- All overboost responses < 100ms
-- All fault conditions result in duty = 0%
-- Fault logging captures complete system state
-- Manual recovery required after fault conditions
+#[test]
+fn test_dome_pressure_cross_validation() {
+    let mut hil = HardwareInLoopTestRig::new();
+    
+    // Test 4-port MAC solenoid operation
+    for duty_cycle in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        hil.set_duty_cycle(duty_cycle);
+        std::thread::sleep(Duration::from_millis(50));  // Settle
+        
+        let upper_dome_psi = hil.read_upper_dome_pressure();
+        let lower_dome_psi = hil.read_lower_dome_pressure();
+        
+        if duty_cycle > 0.8 {
+            // High duty - upper dome should be pressurized
+            assert!(upper_dome_psi > 8.0);
+            assert!(lower_dome_psi < 2.0);
+        } else if duty_cycle < 0.2 {
+            // Low duty - lower dome should be pressurized
+            assert!(lower_dome_psi > 8.0);
+            assert!(upper_dome_psi < 2.0);
+        }
+        
+        // Should never have both domes pressurized simultaneously
+        assert!(!(upper_dome_psi > 8.0 && lower_dome_psi > 8.0));
+    }
+}
 ```
 
-## System Validation Testing
+## System Integration Testing
 
-### SV-001: Vehicle Integration Testing
+### Vehicle Integration Protocol
 
-#### On-Vehicle Validation (Controlled Environment)
-```
-Test Environment: Closed course or dyno facility
+**Phase 1: Static Validation**
+1. **CAN Signal Validation**: Verify Ford S550 signal interpretation with engine off, key on
+2. **Pneumatic Checkout**: Test full pneumatic system operation with engine off
+3. **Display and Interface**: Validate all user interface elements
+4. **Configuration Loading**: Test SD card configuration and learned data handling
 
-Test Phases:
-1. **Baseline Testing**: Compare against spring-only operation
-2. **Calibration Validation**: Perform complete auto-calibration sequence  
-3. **Performance Testing**: Validate smooth power delivery
-4. **Safety Testing**: Confirm overboost protection under real conditions
-5. **Durability Testing**: Extended operation validation
+**Phase 2: Idle Testing**
+1. **Engine Running, No Load**: Validate basic system operation at idle
+2. **Safety System Checkout**: Test all fault detection and response systems
+3. **Learning System Initialization**: Begin basic calibration data collection
 
-Success Criteria:
-- Smoother torque delivery than spring-only system
-- No ECU adaptation or fault codes
-- Successful auto-calibration completion  
-- Zero overboost events during normal operation
-- Stable operation over extended test period
-```
+**Phase 3: Controlled Dynamic Testing**
+1. **Parking Lot Testing**: Low-speed, low-load boost system validation
+2. **Progressive Boost Testing**: Gradually increase boost targets with safety monitoring
+3. **Aggression Level Validation**: Test all aggression settings from conservative to aggressive
 
-## Test Automation and CI/CD
+**Phase 4: Performance Validation** 
+1. **Track/Dyno Testing**: Full performance envelope validation in controlled environment
+2. **Endurance Testing**: Extended operation validation
+3. **Environmental Testing**: Hot/cold weather, altitude testing
 
-### Continuous Integration Pipeline
-```yaml
-# .github/workflows/test.yml
-- Unit Tests: Run on every commit
-- Integration Tests: Run on every PR
-- Safety Tests: Required for merge
-- HIL Tests: Run on release candidates
-- Performance Tests: Weekly regression testing
-```
+### Acceptance Criteria
 
-### Test Coverage Requirements
-- **Safety Code**: 100% path coverage mandatory
-- **Control Logic**: 95% coverage minimum  
-- **HAL Implementations**: 90% coverage minimum
-- **Protocol Handling**: 95% coverage minimum
+**Safety Requirements (Must Pass All)**:
+- [ ] All SY-* safety requirements validated through automated testing
+- [ ] Overboost response time <100ms measured on actual hardware
+- [ ] No single point of failure can cause unsafe operation
+- [ ] System defaults to safe state (duty=0%) for all fault conditions
+- [ ] User cannot configure unsafe parameters through any interface
 
-### Test Data Management
-- **Scenario Libraries**: Standardized test scenarios for repeatability
-- **Baseline Data**: Known-good reference data for regression testing
-- **Failure Databases**: Historical failure modes for comprehensive testing
+**Performance Requirements**:
+- [ ] Torque-following response provides smooth ECU cooperation
+- [ ] No ECU fault codes triggered during normal operation
+- [ ] Boost response time competitive with stock turbocharger behavior
+- [ ] Learning system converges to stable calibration within 50 miles of driving
 
-## Validation Sign-off Criteria
+**Usability Requirements**:
+- [ ] Single aggression knob provides intuitive control across full range
+- [ ] System configuration requires <5 parameters total
+- [ ] SD card portability enables easy configuration backup/restore
+- [ ] All diagnostic information accessible through CLI interface
 
-### Phase 1 Release Criteria
-- [ ] All unit tests pass (100% safety coverage)
-- [ ] All integration scenarios pass
-- [ ] HIL validation complete with production hardware
-- [ ] Vehicle integration testing successful
-- [ ] Safety system validation complete
-- [ ] Documentation and test reports complete
+## Test Coverage Requirements
 
-### Quality Gates
-- **No safety test failures tolerated**
-- **No regressions in core functionality**
-- **Performance meets or exceeds requirements**
-- **All identified risks mitigated or accepted**
+**Safety-Critical Code**: 100% line coverage required
+**Control Logic**: 95% line coverage required  
+**HAL Implementations**: 90% line coverage required
+**Protocol/CLI**: 85% line coverage required
 
-This comprehensive test plan ensures that RumbleDome meets its safety-critical requirements while delivering the innovative torque-aware boost control capabilities.
+**Test Execution Strategy**:
+- All safety tests must pass before any hardware integration
+- Desktop simulation must validate all control scenarios
+- CAN signal validation must complete before vehicle integration
+- Progressive hardware testing with immediate abort on any safety violation
+
+This comprehensive test plan ensures safe, reliable operation while validating all aspects of the torque-following electronic boost controller.

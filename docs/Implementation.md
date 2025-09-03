@@ -1,64 +1,70 @@
 # RumbleDome Implementation Guide
 
-## Recent Implementation Progress
+## 🏗️ Tier 3: Development Support Document
 
-### ✅ PWM Synchronization System (Jan 2025)
-Implemented comprehensive PWM-synchronized control loop timing to prevent phase noise in dome pressure control:
+**🔗 Dependencies:** 
+- **Tier 1**: Context.md, Requirements.md, Safety.md (system goals and constraints)
+- **Tier 2**: TechnicalSpecs.md, Architecture.md, LearnedData.md, Hardware.md (design specifications)
+- **Constraints**: Physics.md, CAN_Signals.md (implementation constraints)
 
-- **PWM frequency increased**: 30Hz → 100Hz for better solenoid response
-- **Multiple sync strategies**: CycleStart, CycleMidpoint, SubCycle timing options
-- **Jitter reduction**: Deadband filtering using FlexPWM resolution (0.003% duty cycle)
-- **Beat frequency detection**: Prevents harmonics between control and PWM frequencies
-- **PWM-aware slew limiting**: Coordinated output changes during synchronized updates
+**📤 Impacts:** Changes to code structure here may affect:
+- **Tier 3**: TestPlan.md (test organization)
 
-### ✅ EEPROM/NVM Storage Implementation (Jan 2025)
-Completed non-volatile storage HAL from placeholder to full implementation:
+## 🔄 Change Impact Checklist
+Before modifying this document:
+- [ ] **✅ TIER 3 CHANGE**: This affects development workflow and code structure
+- [ ] Verify alignment with ALL Tier 2 specifications
+- [ ] Check consistency with Tier 1 goals and Safety.md constraints
+- [ ] Review Physics.md and CAN_Signals.md constraints
+- [ ] Update TestPlan.md if code structure changes affect testing
+- [ ] Ensure build process changes don't conflict with TechnicalSpecs.md
+- [ ] Update cross-references and file paths
 
-- **4KB FlexRAM EEPROM**: Using i.MX RT1062 hardware emulation
-- **Immediate writes**: Automotive-grade persistence (no graceful shutdown dependency)
-- **Comprehensive wear tracking**: 8-region monitoring with health status
-- **Storage sections**: Config (512B), Learned Data (2KB), Calibration (1KB), Safety Log (512B)
-- **Complete test suite**: Storage operations, wear tracking, section management
+📋 **Technical specifications**: See **[TechnicalSpecs.md](TechnicalSpecs.md)** for hardware platform details  
+📖 **Architecture overview**: See **[Architecture.md](Architecture.md)** for system design philosophy  
+⚠️ **Safety requirements**: See **[Safety.md](Safety.md)** for all safety-critical implementation requirements
 
-### ✅ Voltage Divider Support (Jan 2025)
-Updated sensor calibration for 5V pressure sensors with 3.3V ADC input:
+## Implementation Overview
 
-- **10kΩ+20kΩ resistor configuration**: 0.333 voltage ratio for faster ADC reads
-- **Voltage scaling**: 0.5V-4.5V → 0.167V-1.5V (optimized divider ratio)
-- **Updated scale factor**: 22.56 PSI/V (30 PSI ÷ 1.33V span)
-- **Resolution**: 0.018 PSI with 12-bit ADC (more than adequate for boost control)
-- **Formula**: `PSI = ((Vout - 0.167) / 1.33) * 30`
-- **Documentation updated**: Context.md, TestPlan.md, all calibration defaults
+RumbleDome implements **torque-following electronic boost control** through a layered architecture with strict hardware abstraction. The system prioritizes safety, simplicity, and ECU cooperation over maximum performance.
 
-### ✅ MAP Sensor Fusion & Cross-Calibration (Jan 2025)
-Implemented intelligent sensor fusion for full vacuum-to-boost manifold pressure range:
-- **Dual sensor approach**: CAN MAP (vacuum, 0-1 bar) + boost gauge (positive, 0-30 PSI)
-- **Automatic cross-calibration**: Learns systematic offset between sensors in overlap zone
-- **Dynamic compensation**: 1% learning rate with exponential moving average
-- **Seamless operation**: No faults for sensor disagreement - system adapts continuously
-- **Persistent learning**: Cross-calibration stored in EEPROM with environmental factors
-- **Transition zone blending**: Weighted sensor fusion around atmospheric pressure
-- **Atmospheric compensation**: Automatic baseline tracking for altitude/weather changes
+### Core Design Principles
+- **Single aggression parameter** scales all system behavior (0.0-1.0)
+- **Torque gap analysis** drives boost assistance decisions
+- **HAL abstraction** enables desktop simulation and multi-platform support
+- **SD card storage** for configuration portability and wear management
+- **Fail-safe operation** with multiple safety layers
 
 ## Workspace Structure
+
+**🔗 T3-BUILD-001**: **Rust Workspace Architecture**  
+**Derived From**: T2-CONTROL-001 (Priority Hierarchy) + Hardware abstraction requirements  
+**Decision Type**: ⚠️ **Engineering Decision** - Layered crate structure for HAL abstraction  
+**Engineering Rationale**: Workspace isolates hardware-independent core logic for desktop testing  
+**AI Traceability**: Drives crate organization, dependency management, build process
 
 ```
 rumbledome/
 ├── Cargo.toml                 # Workspace root configuration
 ├── crates/
-│   ├── rumbledome-hal/        # Hardware abstraction layer ✅
-│   ├── rumbledome-core/       # Core control logic (no hardware deps) ✅
-│   ├── rumbledome-protocol/   # JSON/CLI protocol definitions ✅
-│   ├── rumbledome-fw/         # Teensy 4.1 firmware binary ⚠️
-│   ├── rumbledome-sim/        # Desktop simulator and test scenarios ❌
-│   └── rumbledome-cli/        # Configuration tool ❌
-├── tests/                     # Integration tests ✅
-└── docs/                      # Project documentation ✅
+│   ├── rumbledome-hal/        # Hardware abstraction layer
+│   ├── rumbledome-core/       # Core control logic (hardware-independent)
+│   ├── rumbledome-protocol/   # JSON/CLI protocol definitions
+│   ├── rumbledome-fw/         # Teensy 4.1 firmware binary
+│   ├── rumbledome-sim/        # Desktop simulator and test scenarios
+│   └── rumbledome-cli/        # Configuration and diagnostic tool
+├── tests/                     # Integration tests
+└── docs/                      # Project documentation
 ```
 
-## Crate Dependencies
+## Crate Architecture
 
-### Dependency Graph
+**🔗 T3-BUILD-002**: **Crate Dependency Structure**  
+**Derived From**: T2-HAL-001 (Platform-Independent Hardware Abstraction) + testing requirements  
+**Decision Type**: 🔗 **Direct Derivation** - Implementation of HAL abstraction principle  
+**AI Traceability**: Drives module boundaries, trait definitions, test isolation
+
+### Dependency Flow
 ```
 rumbledome-fw     ──┐
                     ├─► rumbledome-core ──┐
@@ -69,93 +75,172 @@ rumbledome-cli    ──┐                   ┌┘
                     └─► rumbledome-core
 ```
 
-### Version Management
-- **Workspace-level version**: Single version for all crates
-- **Semantic versioning**: Major.Minor.Patch according to API changes
-- **Feature flags**: Platform-specific features controlled via Cargo features
+**Key isolation**: `rumbledome-core` has **zero hardware dependencies** - all safety-critical logic can run on desktop for comprehensive testing.
 
-## Core Implementation Architecture
+## Core Control Implementation
 
-### State Machine (rumbledome-core)
+**🔗 T3-BUILD-003**: **Core Control State Machine**  
+**Derived From**: T2-CONTROL-003 (3-Level Control Hierarchy) + fault management requirements  
+**Decision Type**: ⚠️ **Engineering Decision** - State machine organization for safety-critical control  
+**Engineering Rationale**: State machine ensures predictable behavior during faults and transitions  
+**AI Traceability**: Drives control flow, fault handling, safety state transitions
+
+### System State Machine
 
 ```rust
+// rumbledome-core/src/state.rs
 #[derive(Debug, Clone, PartialEq)]
 pub enum SystemState {
     Initializing,
     Idle,
     Armed,
-    Calibrating(CalibrationState),
+    Calibrating(CalibrationProgress),
     OverboostCut,
     Fault(FaultCode),
 }
 
 pub struct RumbleDomeCore<H: HalTrait> {
     state: SystemState,
-    config: SystemConfig,
-    learned_data: LearnedData,
-    control_loop: ControlLoop,
+    config: SystemConfig,           // 5 parameters total
+    learned_data: LearnedData,      // See LearnedData.md
+    torque_following: TorqueFollowing,
     safety_monitor: SafetyMonitor,
     calibration: AutoCalibration,
-    pneumatic_optimizer: PneumaticOptimizer,
     hal: H,
 }
 ```
 
-### Control Loop Implementation (3-Level Hierarchy)
+### Configuration Structure (Simplified)
+
+**🔗 T3-BUILD-004**: **5-Parameter Configuration Implementation**  
+**Derived From**: T2-HAL-003 (5-Parameter Configuration Structure) + storage requirements  
+**Decision Type**: 🔗 **Direct Derivation** - Software implementation of single-knob philosophy  
+**AI Traceability**: Drives configuration serialization, parameter validation, UI consistency
 
 ```rust
-impl<H: HalTrait> RumbleDomeCore<H> {
-    pub fn execute_control_cycle(&mut self) -> Result<(), CoreError> {
-        // Input Processing
-        let inputs = self.read_inputs()?; // Sensors + CAN (torque, RPM, MAP)
-        self.validate_inputs(&inputs)?;
-        
-        // LEVEL 1: Torque-Based Boost Target Adjustment
-        let torque_error = inputs.desired_torque - inputs.actual_torque;
-        let base_boost_target = self.get_profile_boost_target(inputs.rpm)?;
-        let adjusted_boost_target = self.modulate_boost_for_torque_gap(
-            base_boost_target, 
-            torque_error,
-            inputs.desired_torque
-        )?;
-        
-        // LEVEL 2: Precise Boost Delivery (PID + Learned)
-        let learned_baseline_duty = self.lookup_learned_duty(adjusted_boost_target, &inputs)?;
-        let boost_error = adjusted_boost_target - inputs.manifold_pressure_gauge;
-        let pid_adjustment = self.pid_controller.update(boost_error)?;
-        let target_duty = learned_baseline_duty + pid_adjustment;
-        
-        // LEVEL 3: Safety and Output
-        let safe_duty = self.apply_safety_overrides(target_duty, &inputs)?;
-        let slew_limited_duty = self.apply_slew_limits(safe_duty)?;
-        
-        self.update_solenoid_output(slew_limited_duty)?;
-        self.update_learning_data(&inputs, slew_limited_duty)?;
-        self.update_system_state(&inputs)?;
-        
-        Ok(())
-    }
+// rumbledome-core/src/config.rs - Only 5 user parameters!
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemConfig {
+    // User-controlled parameters (stored on SD card)
+    pub aggression: f32,              // 0.0-1.0 - scales all behavior
+    pub spring_pressure: f32,         // PSI - wastegate spring pressure
+    pub max_boost_psi: f32,          // PSI - performance ceiling
+    pub overboost_limit: f32,        // PSI - hard safety limit
+    pub scramble_enabled: bool,       // Enable scramble button
     
-    fn modulate_boost_for_torque_gap(&self, base_target: f32, torque_error: f32, desired_torque: f32) -> Result<f32, CoreError> {
-        let torque_target_threshold = desired_torque * self.config.torque_target_percentage / 100.0;
-        
-        if torque_error > 10.0 {
-            // Large gap - ECU needs help, increase boost target slightly
-            Ok((base_target * 1.05).min(self.get_profile_max_boost()))
-        } else if inputs.actual_torque > torque_target_threshold {
-            // Approaching ceiling - back off to prevent ECU intervention  
-            Ok(base_target * 0.95)
-        } else {
-            // ECU satisfied - maintain current boost target
-            Ok(base_target)
+    // System-derived parameters (not user-configurable)
+    pub torque_target_percentage: f32, // Always 95% - derived from safety requirements
+    pub boost_slew_rate: f32,         // Aggression-scaled slew limiting
+}
+
+impl SystemConfig {
+    // All complex behavior derived from single aggression parameter
+    pub fn get_response_characteristics(&self) -> ResponseProfile {
+        ResponseProfile {
+            tip_in_sensitivity: self.aggression * 2.0,
+            tip_out_decay_rate: self.aggression * 0.5 + 0.2,
+            torque_following_gain: self.aggression * 1.5 + 0.3,
+            boost_ramp_rate: self.aggression * 3.0 + 1.0,
         }
     }
 }
 ```
 
-## HAL Implementation Strategy
+## Torque-Following Control Loop
 
-### Platform Abstraction
+**🔗 T3-BUILD-005**: **3-Level Control Hierarchy Implementation**  
+**Derived From**: T2-CONTROL-003 (3-Level Control Hierarchy) + T2-CONTROL-004 (Torque-Based Targeting)  
+**Decision Type**: 🔗 **Direct Derivation** - Software implementation of torque-following control  
+**AI Traceability**: Drives control algorithms, torque analysis, ECU cooperation logic
+
+### 3-Level Control Hierarchy Implementation
+
+```rust
+// rumbledome-core/src/control/mod.rs
+impl<H: HalTrait> RumbleDomeCore<H> {
+    pub fn execute_control_cycle(&mut self) -> Result<(), CoreError> {
+        let inputs = self.read_system_inputs()?;
+        self.safety_monitor.validate_inputs(&inputs)?;
+        
+        // LEVEL 1: Torque Gap Analysis
+        let torque_gap = inputs.desired_torque - inputs.actual_torque;
+        let assistance_needed = self.analyze_torque_assistance_need(torque_gap, &inputs)?;
+        
+        // LEVEL 2: Boost Assistance Calculation  
+        let target_boost = if assistance_needed {
+            self.calculate_boost_assistance(torque_gap, &inputs)?
+        } else {
+            self.get_baseline_boost(&inputs)?  // Minimal assistance
+        };
+        
+        // LEVEL 3: Safety-Validated Output
+        let target_duty = self.boost_to_duty_conversion(target_boost, &inputs)?;
+        let safe_duty = self.safety_monitor.validate_and_limit(target_duty, &inputs)?;
+        let final_duty = self.apply_aggression_scaling(safe_duty)?;
+        
+        self.update_output(final_duty)?;
+        self.update_learning_system(&inputs, final_duty)?;
+        
+        Ok(())
+    }
+    
+    fn analyze_torque_assistance_need(&self, torque_gap: f32, inputs: &SystemInputs) -> Result<bool, CoreError> {
+        let torque_ceiling = inputs.desired_torque * 0.95;  // Always 95%
+        
+        // ECU struggling to achieve torque target?
+        if torque_gap > 10.0 {  // Nm threshold
+            return Ok(true);    // Provide assistance
+        }
+        
+        // Approaching ECU torque ceiling? 
+        if inputs.actual_torque > torque_ceiling {
+            return Ok(false);   // Back off to prevent ECU intervention
+        }
+        
+        // Normal operation - minimal assistance
+        Ok(false)
+    }
+}
+```
+
+### Learning System Integration
+
+```rust
+// rumbledome-core/src/learning/mod.rs
+pub struct LearnedData {
+    pub duty_calibration: DutyCalibrationMap,      // RPM×Boost → Duty cycle
+    pub environmental: EnvironmentalFactors,       // Temperature/altitude compensation  
+    pub sensor_fusion: SensorCrossCal,           // CAN MAP vs boost gauge calibration
+    pub safety_parameters: SafetyCharacteristics, // Response time validation
+}
+
+impl LearnedData {
+    pub fn lookup_baseline_duty(&self, rpm: u16, boost_psi: f32) -> Result<f32, LearningError> {
+        let base_duty = self.duty_calibration.interpolate(rpm, boost_psi)?;
+        let env_adjusted = self.environmental.compensate(base_duty)?;
+        Ok(env_adjusted.clamp(0.0, 1.0))
+    }
+    
+    pub fn update_from_operation(&mut self, inputs: &SystemInputs, duty: f32) -> Result<(), LearningError> {
+        // Update duty cycle calibration
+        self.duty_calibration.learn_point(inputs.rpm, inputs.manifold_pressure, duty)?;
+        
+        // Update environmental compensation
+        self.environmental.adapt_to_conditions(&inputs)?;
+        
+        // Update sensor cross-calibration
+        if let (Some(can_map), Some(boost_gauge)) = (inputs.can_map, inputs.boost_gauge) {
+            self.sensor_fusion.update_cross_calibration(can_map, boost_gauge)?;
+        }
+        
+        Ok(())
+    }
+}
+```
+
+## Hardware Abstraction Layer
+
+### HAL Trait Definition
 
 ```rust
 // rumbledome-hal/src/traits.rs
@@ -167,254 +252,334 @@ pub trait HalTrait: Send + Sync {
     type Can: Can;
     type Display: Display;
     type Gpio: Gpio;
-    type Logger: Logger;
-    type FaultReporter: FaultReporter;
-    type Watchdog: Watchdog;
 }
 
-// Platform-specific implementations
-#[cfg(feature = "teensy41")]
-pub mod teensy41;
+// CAN abstraction for Ford S550 signals
+pub trait Can {
+    fn read_rpm(&mut self) -> Result<u16, HalError>;
+    fn read_torque_signals(&mut self) -> Result<TorqueData, HalError>;
+    fn read_manifold_pressure(&mut self) -> Result<f32, HalError>;
+}
 
-#[cfg(feature = "sim")]
-pub mod mock;
+#[derive(Debug, Clone)]
+pub struct TorqueData {
+    pub engine_load_torque: f32,  // From 0x167 - need to determine if desired or actual
+    pub engine_load_percent: f32, // From 0x43E - alternative torque signal
+    pub timestamp_ms: u32,
+}
 ```
 
-### Teensy 4.1 Implementation
+### Platform Implementations
 
 ```rust
 // rumbledome-hal/src/teensy41/mod.rs
 pub struct Teensy41Hal {
-    pwm: Teensy41Pwm,
-    analog: Teensy41Analog,
-    storage: Teensy41Storage,
     can: Teensy41Can,
-    display: Teensy41Display,
-    gpio: Teensy41Gpio,
+    analog: Teensy41Analog,
+    storage: SdCardStorage,  // MicroSD instead of EEPROM
+    display: St7735Display,
+    pwm: FlexPwm,
 }
 
-impl HalTrait for Teensy41Hal {
-    type Time = Teensy41Time;
-    type Pwm = Teensy41Pwm;
-    // ... other associated types
+impl Can for Teensy41Can {
+    fn read_torque_signals(&mut self) -> Result<TorqueData, HalError> {
+        // Read Ford S550 CAN messages
+        let msg_167 = self.read_can_message(0x167)?;  // Engine load/torque + MAP
+        let msg_43e = self.read_can_message(0x43E)?;  // Engine load percentage
+        
+        Ok(TorqueData {
+            engine_load_torque: self.decode_167_torque(&msg_167)?,
+            engine_load_percent: self.decode_43e_load(&msg_43e)?, 
+            timestamp_ms: self.get_timestamp_ms(),
+        })
+    }
+    
+    fn decode_167_torque(&self, msg: &CanMessage) -> Result<f32, HalError> {
+        // Implementation: ((b1-128)<<8 + b2) / 4
+        let raw = ((msg.data[1] as u16 - 128) << 8) + msg.data[2] as u16;
+        Ok(raw as f32 / 4.0)
+    }
 }
-```
 
-### Mock Implementation for Testing
-
-```rust
-// rumbledome-hal/src/mock/mod.rs
+// rumbledome-hal/src/mock/mod.rs  
 pub struct MockHal {
-    // Test scenario configuration
     scenario: TestScenario,
-    // Simulated sensor values
-    sensors: MockSensors,
-    // CAN message simulation
-    can_sim: MockCan,
+    mock_time: MockTime,
+    mock_sensors: MockSensors,
+    mock_can: MockCan,
 }
 
-impl HalTrait for MockHal {
-    type Time = MockTime;
-    type Pwm = MockPwm;
-    // ... other mock implementations
-}
-```
-
-## Data Structure Implementation
-
-### Configuration Management
-
-```rust
-// rumbledome-core/src/config.rs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemConfig {
-    pub spring_pressure: f32,
-    pub profiles: HashMap<String, BoostProfile>,
-    pub active_profile: String,
-    pub scramble_profile: String,
-    pub torque_target_percentage: f32,
-    pub boost_slew_rate: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoostProfile {
-    pub name: String,
-    pub boost_targets: Vec<(u16, f32)>, // (RPM, PSI)
-    pub overboost_limit: f32,
-    pub overboost_hysteresis: f32,
-}
-```
-
-### Learning Data Management
-
-```rust
-// rumbledome-core/src/learning.rs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LearnedData {
-    pub calibration_map: CalibrationMap,
-    pub environmental_factors: EnvironmentalFactors,
-    pub confidence_metrics: ConfidenceMetrics,
-    pub last_updated: SystemTime,
-}
-
-pub struct CalibrationMap {
-    // 2D interpolation table: (RPM, Boost) -> Duty Cycle
-    pub duty_map: InterpolationTable2D,
-    pub bounds: DutyCycleBounds,
-}
-
-#[derive(Debug, Clone)]
-pub struct EnvironmentalFactors {
-    pub temperature_compensation: f32,
-    pub altitude_compensation: f32,
-    pub supply_pressure_baseline: f32,
-}
-```
-
-### Safety System Implementation
-
-```rust
-// rumbledome-core/src/safety.rs
-pub struct SafetyMonitor {
-    overboost_detector: OverboostDetector,
-    fault_manager: FaultManager,
-    response_validator: ResponseValidator,
-}
-
-impl SafetyMonitor {
-    pub fn check_safety(&mut self, inputs: &SystemInputs, duty_cycle: f32) -> Result<f32, SafetyError> {
-        // Check overboost conditions
-        self.overboost_detector.check(inputs.manifold_pressure)?;
-        
-        // Validate pneumatic response capability
-        self.response_validator.validate_response_time(inputs.dome_pressures)?;
-        
-        // Apply progressive limits
-        let safe_duty = self.apply_progressive_limits(duty_cycle, inputs)?;
-        
-        Ok(safe_duty)
+impl Can for MockCan {
+    fn read_torque_signals(&mut self) -> Result<TorqueData, HalError> {
+        // Simulate realistic torque signal behavior for testing
+        Ok(self.scenario.get_current_torque_data())
     }
 }
 ```
 
-## Auto-Calibration Implementation
+## Safety System Implementation
 
-### Progressive Calibration Strategy
+### Multi-Layer Safety Architecture
 
 ```rust
-// rumbledome-core/src/calibration.rs
+// rumbledome-core/src/safety/mod.rs
+pub struct SafetyMonitor {
+    overboost_detector: OverboostDetector,
+    response_validator: ResponseTimeValidator,
+    fault_manager: FaultManager,
+    pneumatic_monitor: PneumaticHealthMonitor,
+}
+
+impl SafetyMonitor {
+    pub fn validate_and_limit(&mut self, target_duty: f32, inputs: &SystemInputs) -> Result<f32, SafetyError> {
+        // SY-1: Overboost protection (highest priority)
+        if inputs.manifold_pressure > inputs.config.overboost_limit {
+            self.fault_manager.trigger_overboost_fault()?;
+            return Ok(0.0);  // Immediate duty=0% for wastegate open
+        }
+        
+        // SY-2: Pneumatic response validation
+        self.response_validator.validate_dome_response(&inputs.dome_pressures)?;
+        
+        // SY-3: Progressive safety limits
+        let conservative_limit = self.calculate_safe_duty_ceiling(inputs)?;
+        let limited_duty = target_duty.min(conservative_limit);
+        
+        // SY-4: Slew rate limiting (aggression-scaled)
+        let slew_limited = self.apply_slew_limits(limited_duty, inputs.config.aggression)?;
+        
+        Ok(slew_limited)
+    }
+    
+    fn calculate_safe_duty_ceiling(&self, inputs: &SystemInputs) -> Result<f32, SafetyError> {
+        // Dynamic safety ceiling based on pneumatic system health
+        let base_ceiling = 0.8;  // 80% max duty for safety margin
+        let health_factor = inputs.dome_pressures.calculate_health_factor();
+        Ok(base_ceiling * health_factor)
+    }
+}
+```
+
+## Auto-Calibration System
+
+### Progressive Calibration Implementation
+
+```rust
+// rumbledome-core/src/calibration/mod.rs
 pub struct AutoCalibration {
     state: CalibrationState,
-    current_limits: ProgressiveLimits,
+    safety_validator: CalibrationSafetyValidator,
     learning_session: LearningSession,
 }
 
 #[derive(Debug, Clone)]
 pub enum CalibrationState {
     Inactive,
-    Conservative { target_rpm: u16, target_boost: f32, runs_completed: u8 },
-    Progressive { current_limit: f32, confidence: f32 },
-    Complete,
+    Phase1Conservative { runs_completed: u8, target_boost: f32 },
+    Phase2Progressive { current_limit: f32, confidence: f32 },
+    Complete { final_overboost_limit: f32 },
 }
 
 impl AutoCalibration {
-    pub fn start_session(&mut self, target: CalibrationTarget) -> Result<(), CalibrationError> {
-        // Start with spring + 1 psi overboost limit
-        let initial_limit = target.spring_pressure + 1.0;
+    pub fn start_calibration_session(&mut self, config: &SystemConfig) -> Result<(), CalibrationError> {
+        // SY-4: Start at spring + 1 psi for ultra-conservative safety
+        let initial_limit = config.spring_pressure + 1.0;
         
-        self.state = CalibrationState::Conservative {
-            target_rpm: target.rpm,
-            target_boost: target.boost,
+        self.state = CalibrationState::Phase1Conservative {
             runs_completed: 0,
+            target_boost: initial_limit - 0.5,  // Target below limit
         };
         
-        self.current_limits.overboost_limit = initial_limit;
+        // Update runtime safety limits
+        self.safety_validator.set_calibration_limits(initial_limit)?;
         Ok(())
     }
     
-    pub fn process_run_result(&mut self, result: CalibrationRunResult) -> CalibrationAction {
+    pub fn process_calibration_run(&mut self, result: CalibrationResult) -> CalibrationAction {
         match &mut self.state {
-            CalibrationState::Conservative { runs_completed, .. } => {
+            CalibrationState::Phase1Conservative { runs_completed, .. } => {
                 *runs_completed += 1;
-                if *runs_completed >= 3 && result.consistency_check() {
+                
+                // Validate safety response time during run
+                if !result.safety_response_acceptable() {
+                    return CalibrationAction::AbortDueToSafetyResponse;
+                }
+                
+                if *runs_completed >= 3 && result.consistency_check_passed() {
                     CalibrationAction::AdvanceToProgressive
                 } else {
                     CalibrationAction::RepeatRun
                 }
             },
-            // ... other states
+            CalibrationState::Phase2Progressive { current_limit, confidence } => {
+                if result.target_achieved_safely() {
+                    *confidence += 0.1;
+                    *current_limit += 0.2;  // Gradual limit increases
+                    
+                    if *confidence > 0.8 {
+                        CalibrationAction::CompleteCalibration(*current_limit)
+                    } else {
+                        CalibrationAction::ContinueProgressive
+                    }
+                } else {
+                    CalibrationAction::RollbackToSafeLimit
+                }
+            },
+            _ => CalibrationAction::NoAction,
         }
+    }
+}
+```
+
+## Storage Architecture
+
+### SD Card-Based Configuration
+
+```rust
+// rumbledome-hal/src/storage/sd_card.rs
+pub struct SdCardStorage {
+    card: SdCard,
+    filesystem: Fat32,
+    write_debouncer: WriteDebouncer,  // 5-10 second debouncing
+}
+
+pub struct PortableConfiguration {
+    // Only 5 user-configurable parameters
+    pub aggression: f32,
+    pub spring_pressure: f32, 
+    pub max_boost_psi: f32,
+    pub overboost_limit: f32,
+    pub scramble_enabled: bool,
+}
+
+impl Storage for SdCardStorage {
+    fn save_configuration(&mut self, config: &PortableConfiguration) -> Result<(), StorageError> {
+        // Atomic write using temp file + rename
+        let temp_file = "/RUMBLEDOME/config/.user_config_temp.json";
+        let final_file = "/RUMBLEDOME/config/user_config.json";
+        
+        // Debounce writes to extend SD card life
+        self.write_debouncer.schedule_write(|| {
+            self.filesystem.write_file(temp_file, &config.serialize()?)?;
+            self.filesystem.rename(temp_file, final_file)?;
+            Ok(())
+        })
+    }
+    
+    fn load_learned_data(&mut self) -> Result<LearnedData, StorageError> {
+        // Learned data stored in binary format for efficiency
+        let calibration = self.filesystem.read_file("/RUMBLEDOME/learned/calibration_maps.bin")?;
+        let environmental = self.filesystem.read_json("/RUMBLEDOME/learned/environmental.json")?;
+        let sensor_fusion = self.filesystem.read_json("/RUMBLEDOME/learned/sensor_fusion.json")?;
+        let safety_params = self.filesystem.read_json("/RUMBLEDOME/learned/safety_params.json")?;
+        
+        Ok(LearnedData::from_components(calibration, environmental, sensor_fusion, safety_params)?)
     }
 }
 ```
 
 ## Testing Strategy
 
-### Unit Testing Structure
+### Desktop Simulation Framework
 
 ```rust
-// rumbledome-core/tests/control_loop_tests.rs
+// rumbledome-sim/src/scenarios/mod.rs
+pub struct TestScenario {
+    name: String,
+    vehicle_model: VehicleSimulation,
+    environmental_conditions: EnvironmentalSim,
+    failure_injection: FailureInjection,
+}
+
+pub struct VehicleSimulation {
+    engine: EngineModel,
+    turbo: TurboModel, 
+    wastegate: WastegateModel,
+    ecu_torque_model: EcuTorqueModel,
+}
+
+impl TestScenario {
+    pub fn overboost_response_test() -> Self {
+        Self {
+            name: "Overboost Response Validation".to_string(),
+            vehicle_model: VehicleSimulation::stock_s550(),
+            environmental_conditions: EnvironmentalSim::standard(),
+            failure_injection: FailureInjection::none(),
+        }
+    }
+    
+    pub fn run_scenario(&mut self, core: &mut RumbleDomeCore<MockHal>) -> TestResult {
+        // 1. Initialize to normal operation
+        for _ in 0..100 { core.execute_control_cycle()?; }
+        
+        // 2. Inject overboost condition
+        self.vehicle_model.set_manifold_pressure(12.0);  // Above 10 psi limit
+        
+        // 3. Verify safety response
+        core.execute_control_cycle()?;
+        
+        TestResult {
+            response_time_ms: self.measure_response_time(),
+            final_duty_cycle: core.get_current_duty_cycle(),
+            system_state: core.get_system_state(),
+            safety_triggered: core.safety_monitor.get_active_faults().len() > 0,
+        }
+    }
+}
+```
+
+### Unit Test Structure
+
+```rust
+// rumbledome-core/tests/safety_tests.rs
 #[cfg(test)]
-mod tests {
+mod safety_tests {
     use super::*;
     use rumbledome_hal::mock::MockHal;
     
     #[test]
-    fn test_overboost_response() {
+    fn test_overboost_immediate_response() {
         let mut hal = MockHal::new();
-        hal.set_manifold_pressure(10.0); // Above limit
+        let mut core = RumbleDomeCore::new(hal, test_config());
         
-        let mut core = RumbleDomeCore::new(hal);
+        // Set normal operation
+        core.hal.set_manifold_pressure(5.0);  // Normal
+        core.execute_control_cycle().unwrap();
+        assert!(core.get_duty_cycle() > 0.0);
+        
+        // Trigger overboost
+        core.hal.set_manifold_pressure(12.0);  // Above 10 psi limit
         core.execute_control_cycle().unwrap();
         
-        assert_eq!(core.get_duty_cycle(), 0.0); // Should cut to 0%
-        assert_eq!(core.get_state(), SystemState::OverboostCut);
+        // Verify immediate response
+        assert_eq!(core.get_duty_cycle(), 0.0);  // Should cut to 0%
+        assert_eq!(core.get_system_state(), SystemState::OverboostCut);
     }
     
     #[test]
-    fn test_torque_cooperation() {
+    fn test_torque_cooperation_behavior() {
         let mut hal = MockHal::new();
-        hal.set_torque_signals(200.0, 190.0); // Desired: 200, Actual: 190
+        let mut core = RumbleDomeCore::new(hal, test_config());
         
-        let mut core = RumbleDomeCore::new(hal);
+        // ECU achieving torque target - should provide minimal assistance
+        core.hal.set_torque_signals(200.0, 195.0);  // 5 Nm gap - acceptable
         core.execute_control_cycle().unwrap();
+        assert!(core.get_duty_cycle() < 0.3);  // Minimal boost assistance
         
-        // Should target 95% of 200 = 190 Nm (already achieved)
-        assert!(core.get_duty_cycle() < 0.1); // Minimal adjustment needed
+        // ECU struggling with torque - should provide assistance
+        core.hal.set_torque_signals(200.0, 175.0);  // 25 Nm gap - needs help
+        core.execute_control_cycle().unwrap();
+        assert!(core.get_duty_cycle() > 0.5);  // Increased boost assistance
+        
+        // ECU at torque ceiling - should back off
+        core.hal.set_torque_signals(200.0, 195.0);  // Back to normal
+        core.execute_control_cycle().unwrap();
+        // Duty cycle should decrease from previous high value
     }
 }
 ```
 
-### Integration Testing
-
-```rust
-// rumbledome-core/tests/integration_tests.rs
-#[test]
-fn test_full_calibration_cycle() {
-    let mut hal = MockHal::new();
-    let mut core = RumbleDomeCore::new(hal);
-    
-    // Start calibration at 4000 RPM, 8.0 PSI target
-    core.start_calibration(4000, 8.0).unwrap();
-    
-    // Simulate multiple WOT runs
-    for run in 0..5 {
-        hal.simulate_wot_run(4000, 8.0);
-        
-        // Execute multiple control cycles
-        for _ in 0..100 {
-            core.execute_control_cycle().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-    }
-    
-    // Verify calibration completed successfully  
-    assert_eq!(core.get_calibration_state(), CalibrationState::Complete);
-    assert!(core.get_learned_duty(4000, 8.0).unwrap() > 0.0);
-}
-```
-
-## Build Configuration
+## Build System Configuration
 
 ### Workspace Cargo.toml
 
@@ -440,9 +605,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 log = "0.4"
+defmt = "0.3"           # Embedded logging
+embedded-hal = "0.2"    # Hardware abstraction
+nb = "1.0"
 ```
 
-### Platform-Specific Features
+### Platform-Specific Builds
 
 ```toml
 # rumbledome-fw/Cargo.toml
@@ -453,586 +621,55 @@ version.workspace = true
 [dependencies]
 rumbledome-core = { path = "../rumbledome-core" }
 rumbledome-hal = { path = "../rumbledome-hal", features = ["teensy41"] }
+rumbledome-protocol = { path = "../rumbledome-protocol" }
+
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+teensy4-bsp = "0.4"     # Teensy 4.x board support
 
 [target.thumbv7em-none-eabihf]
 runner = "teensy_loader_cli --mcu=TEENSY41 -w"
+rustflags = ["-C", "link-arg=-Tlink.x"]
 ```
 
-## Deployment and Flashing
-
-### Firmware Build Process
+### Development Commands
 
 ```bash
-# Build for Teensy 4.1
-cd crates/rumbledome-fw
-cargo build --release --target thumbv7em-none-eabihf
+# Desktop simulation and testing
+cargo test --workspace                           # All unit tests
+cargo run -p rumbledome-sim --release           # Desktop simulator
+cargo run -p rumbledome-cli -- status           # CLI tool
 
-# Flash to device
+# Embedded development  
+cargo check --target thumbv7em-none-eabihf     # Check embedded build
+cargo build -p rumbledome-fw --release --target thumbv7em-none-eabihf
 teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/rumbledome-fw.hex
+
+# Code quality
+cargo clippy --workspace                        # Linting
+cargo fmt --workspace                          # Formatting  
+cargo doc --workspace --open                   # Documentation
 ```
-
-### Desktop Simulation
-
-```bash
-# Run desktop simulator
-cd crates/rumbledome-sim
-cargo run --release
-
-# Run with specific test scenario
-cargo run --release -- --scenario overboost_test
-```
-
-### Configuration Tool
-
-```bash
-# Build CLI configuration tool
-cd crates/rumbledome-cli
-cargo build --release
-
-# Connect to device and configure
-./target/release/rumbledome-cli --port /dev/ttyUSB0 configure --profile daily
-
-# Storage health monitoring commands
-./target/release/rumbledome-cli --port /dev/ttyUSB0 status --storage-health
-./target/release/rumbledome-cli --port /dev/ttyUSB0 diagnostics --eeprom-report
-./target/release/rumbledome-cli --port /dev/ttyUSB0 diagnostics --wear-tracking
-
-# Backup and restore commands for microcontroller replacement
-./target/release/rumbledome-cli backup --port /dev/ttyUSB0 --output my_ebc_backup.json
-./target/release/rumbledome-cli restore --port /dev/ttyUSB0 --backup-file my_ebc_backup.json
-./target/release/rumbledome-cli verify my_ebc_backup.json
-./target/release/rumbledome-cli list-backups --directory ./backups/
-
-# MicroSD card configuration management
-./target/release/rumbledome-cli sd-card list-profiles
-./target/release/rumbledome-cli sd-card load-profile daily_driver
-./target/release/rumbledome-cli sd-card save-profile --name track_day --description "Aggressive track tune"
-./target/release/rumbledome-cli sd-card backup --output sd_backup.json
-./target/release/rumbledome-cli sd-card restore --backup-file sd_backup.json
-
-# Bluetooth connection examples (same commands as USB-C)
-./target/release/rumbledome-cli --bluetooth status --storage-health
-./target/release/rumbledome-cli --bluetooth backup --output mobile_backup.json
-./target/release/rumbledome-cli --bluetooth config --profile sport_mode
-```
-
-## Storage Health Monitoring Implementation
-
-### Automotive Storage Reality
-
-Unlike desktop applications, automotive ECUs experience abrupt power loss when the ignition is turned off. This requires a fundamentally different approach to data persistence:
-
-```rust
-// rumbledome-hal/src/teensy41/storage.rs
-
-// CRITICAL: Immediate write-through strategy for automotive environment
-impl NonVolatileStorage for Teensy41Storage {
-    fn write(&mut self, offset: usize, data: &[u8]) -> Result<(), HalError> {
-        // Update cache for fast reads
-        self.eeprom_cache[offset..offset + write_len].copy_from_slice(&data[..write_len]);
-        
-        // AUTOMOTIVE REALITY: Write immediately to EEPROM (no deferred writes)
-        // Power loss (key-off) can happen at any time without warning
-        #[cfg(target_arch = "arm")]
-        unsafe {
-            let eeprom_base = 0x1401C000u32 as *mut u8;
-            core::ptr::copy_nonoverlapping(data.as_ptr(), eeprom_base.add(offset), write_len);
-        }
-        
-        // Update comprehensive wear tracking
-        let region = self.get_region_index(offset);
-        if region < self.write_counters.len() {
-            self.write_counters[region] += 1;
-        }
-        
-        Ok(())
-    }
-}
-```
-
-### Comprehensive Wear Tracking
-
-The system tracks detailed wear statistics for predictive maintenance:
-
-```rust
-// Storage health monitoring structures
-pub struct StorageHealthReport {
-    pub overall_health: StorageHealth,           // Excellent → Failed
-    pub estimated_lifespan_years: f32,          // Predictive modeling
-    pub most_worn_region: RegionWearInfo,       // Detailed wear analysis
-    pub write_statistics: WriteStatistics,      // Usage patterns
-    pub health_summary: String,                 // Human-readable status
-    pub recommendations: Vec<String>,           // Actionable advice
-}
-
-// Health status classification with clear thresholds
-pub enum StorageHealth {
-    Excellent,  // < 50% of 100,000 cycle limit
-    Good,       // 50-79% 
-    Warning,    // 80-94% (years of advance warning)
-    Critical,   // 95-99% (months before failure)
-    Failed,     // ≥ 100% (immediate replacement needed)
-}
-```
-
-### CLI Health Commands
-
-Storage health monitoring is accessible via multiple interfaces:
-
-```bash
-# Quick health status check
-rumbledome status --storage-health
-# Output: "✅ Storage: Excellent (2.3% worn, >100 years remaining)"
-
-# Detailed EEPROM health report  
-rumbledome diagnostics --eeprom-report
-# Output: Full console report with wear percentages, statistics, recommendations
-
-# Raw wear tracking data for analysis
-rumbledome diagnostics --wear-tracking --format json
-# Output: JSON data for trending analysis and logging
-```
-
-### TFT Display Integration
-
-Storage health is surfaced on the Teensy 4.1 display:
-
-```rust
-// Display integration in rumbledome-hal/src/teensy41/display.rs
-impl DisplayController for Teensy41Display {
-    fn show_status(&mut self, storage_health: StorageHealth) -> Result<(), HalError> {
-        // Show health icon on main status screen
-        let health_icon = match storage_health {
-            StorageHealth::Excellent | StorageHealth::Good => "✅",
-            StorageHealth::Warning => "⚠️", 
-            StorageHealth::Critical => "🚨",
-            StorageHealth::Failed => "❌",
-        };
-        
-        // Health indicator always visible in corner of display
-        self.draw_status_icon(health_icon, Point::new(110, 5))?;
-        
-        // Detailed health info available in diagnostic menu
-        if in_diagnostic_mode {
-            self.show_detailed_health_info(storage_health)?;
-        }
-        
-        Ok(())
-    }
-}
-```
-
-### Desktop Simulator Health Monitoring
-
-The desktop simulator includes full wear tracking simulation:
-
-```rust
-// rumbledome-sim/src/storage_sim.rs
-impl StorageSimulator {
-    // Simulate realistic wear patterns based on learning activity
-    pub fn simulate_wear_progression(&mut self, learning_events: usize) {
-        for _ in 0..learning_events {
-            // Simulate learned data write (typically 50-100 bytes)
-            let write_size = rand::range(50..100);
-            self.simulate_write(LEARNED_DATA_REGION, write_size);
-            
-            // Update wear tracking as real hardware would
-            self.wear_data.update_wear_statistics(write_size);
-        }
-    }
-    
-    // Provide predictive wear timeline for testing different usage patterns
-    pub fn project_lifespan(&self, daily_drive_hours: f32) -> f32 {
-        // Model realistic automotive usage patterns
-        let writes_per_hour = self.estimate_writes_per_hour(daily_drive_hours);
-        let annual_writes = writes_per_hour * daily_drive_hours * 365.0;
-        
-        EEPROM_WEAR_LIMIT as f32 / annual_writes
-    }
-}
-```
-
-This comprehensive approach prevents mystery storage failures by providing years of advance warning with clear, actionable guidance for end users.
-
-## Microcontroller Backup and Replacement System
-
-### Development Reality: "Unplanned Thermal Events"
-
-Hardware development inevitably involves microcontroller failures - whether from development mistakes, component failures, or "unplanned thermal events" during prototyping. The backup/restore system ensures no learning data or configuration is ever lost:
-
-### Complete System Backup
-
-```rust
-// Full system backup via SystemBackup trait
-pub trait SystemBackup {
-    fn create_full_backup(&mut self) -> Result<SystemBackupData, HalError>;
-    fn restore_from_backup(&mut self, backup: &SystemBackupData) -> Result<RestoreResult, HalError>;
-    fn verify_backup(&self, backup: &SystemBackupData) -> Result<BackupVerification, HalError>;
-}
-
-// Comprehensive backup data structure
-pub struct SystemBackupData {
-    pub metadata: BackupMetadata,        // Version, hardware, timestamps
-    pub user_config: Vec<u8>,           // User profiles and settings
-    pub learned_data: Vec<u8>,          // Calibration maps and environmental factors
-    pub calibration_state: Vec<u8>,     // Auto-calibration progress
-    pub safety_log: Vec<u8>,           // Historical safety events
-    pub wear_tracking: WearTrackingBackup, // Storage health history
-    pub system_stats: SystemStatsBackup,   // Runtime and performance data
-    pub checksum: u32,                 // Data integrity verification
-}
-```
-
-### CLI Backup Commands
-
-**Create System Backup**:
-```bash
-# Quick backup with auto-generated filename
-rumbledome backup --port /dev/ttyUSB0
-
-# Backup with custom filename and description
-rumbledome backup --port /dev/ttyUSB0 \
-  --output "daily_driver_backup_2025.json" \
-  --description "Pre-modification backup of daily driver tune"
-
-# Compressed backup for archival
-rumbledome backup --port /dev/ttyUSB0 --compress
-```
-
-**Restore to New Microcontroller**:
-```bash
-# Standard restore with compatibility verification
-rumbledome restore --port /dev/ttyUSB0 --backup-file my_backup.json
-
-# Force restore despite compatibility warnings (development)
-rumbledome restore --port /dev/ttyUSB0 --backup-file old_backup.json --force
-
-# Selective restore (config only, skip learned data)
-rumbledome restore --port /dev/ttyUSB0 --backup-file backup.json \
-  --skip-learned-data --yes
-
-# Safe restore with pre-restore backup
-rumbledome restore --port /dev/ttyUSB0 --backup-file backup.json \
-  --backup-first
-```
-
-**Backup Management**:
-```bash
-# Verify backup integrity before restore
-rumbledome verify backup_file.json --detailed
-
-# List and analyze available backups
-rumbledome list-backups --directory ./backups --sort-date
-
-# Show backups from specific system
-rumbledome list-backups --system-filter "teensy41-12345678"
-```
-
-### Compatibility and Version Management
-
-The system handles version compatibility intelligently:
-
-```rust
-pub struct BackupVerification {
-    pub is_valid: bool,                    // Overall validity
-    pub checksum_valid: bool,              // Data integrity
-    pub version_compatible: bool,          // Firmware compatibility
-    pub hardware_compatible: bool,         // Platform compatibility
-    pub compatibility_report: CompatibilityReport,
-    pub issues: Vec<String>,               // Specific problems
-}
-
-pub struct CompatibilityReport {
-    pub learned_data_compatible: bool,     // Can learned data be restored?
-    pub config_compatible: bool,           // Can user config be restored?
-    pub version_delta: VersionDelta,       // Version difference analysis
-    pub required_migrations: Vec<String>,  // Needed data transformations
-}
-```
-
-**Example Compatibility Handling**:
-```
-🔍 Checking compatibility...
-⚠️  Compatibility warnings:
-   • Firmware version mismatch: 0.1.0 → 0.2.0
-   • Minor version change detected - learned data may need recalibration
-
-❌ Restore aborted due to compatibility issues.
-   Use --force to override (not recommended for production)
-```
-
-### Development Workflow Integration
-
-**Typical Development Scenarios**:
-
-1. **Pre-Modification Backup**:
-   ```bash
-   # Before making risky changes
-   rumbledome backup --port /dev/ttyUSB0 \
-     --description "Pre-turbo-upgrade baseline tune"
-   ```
-
-2. **Failed Microcontroller Replacement**:
-   ```bash
-   # Magic smoke escaped - replace Teensy and restore
-   rumbledome restore --port /dev/ttyUSB0 \
-     --backup-file "working_tune_backup.json" \
-     --force  # Development environment
-   ```
-
-3. **Production ECU Upgrade**:
-   ```bash
-   # Customer ECU replacement with verification
-   rumbledome backup --port /dev/ttyUSB0 \
-     --output "customer_ecu_backup.json"
-   
-   # Install new ECU, then restore with verification
-   rumbledome restore --port /dev/ttyUSB0 \
-     --backup-file "customer_ecu_backup.json"
-   ```
-
-### Data Preservation Across Replacements
-
-**What Gets Preserved**:
-- **User Configuration**: Boost profiles, sensor calibrations, safety limits
-- **Learned Data**: Complete calibration maps with confidence metrics
-- **Auto-Calibration Progress**: Partially completed calibration sessions
-- **Safety Event Log**: Historical fault analysis data
-- **System Statistics**: Runtime hours, learning sessions, performance metrics
-- **Wear History**: Previous microcontroller EEPROM wear data for continuity
-
-**What Starts Fresh**:
-- **Storage Wear Counters**: New microcontroller = fresh EEPROM
-- **System Serial Number**: Each micro has unique hardware ID
-- **Real-Time Metrics**: Current boost/RPM readings (transient data)
-
-### Error Recovery and Validation
-
-**Restore Validation Process**:
-1. **Backup Verification**: Checksum and structure validation
-2. **Compatibility Check**: Hardware and firmware compatibility analysis  
-3. **Data Migration**: Handle version differences with appropriate transforms
-4. **Incremental Restore**: Per-section restoration with rollback capability
-5. **Post-Restore Validation**: Verify system operation and sensor calibration
-6. **Required Actions**: Clear checklist of manual verification steps
-
-**Example Restore Results**:
-```
-📊 Restore Results:
-   User Config:      ✅ Success
-   Learned Data:     ✅ Success
-   Calibration:      ✅ Success
-   Safety Log:       ✅ Success
-
-📋 Required actions:
-   • Restart EBC to activate restored configuration
-   • Verify sensor calibrations in safe environment
-   • Test all boost profiles before normal operation
-
-⚠️  Warnings:
-   • Firmware version mismatch detected
-```
-
-This system ensures that hardware failures during development never result in lost tuning data, while production deployments have full traceability and verification.
-
-## MicroSD Card and Bluetooth Serial Integration
-
-### Two-Tier Storage Architecture
-
-The system uses a **dual storage strategy** that separates portable configuration from hardware-specific data:
-
-```rust
-// Storage architecture implementation
-pub struct RumbleDomeStorage {
-    // Instance-specific storage (tied to physical micro)
-    eeprom: Teensy41Storage,           // 4KB EEPROM emulation
-    
-    // Portable storage (hardware-independent)  
-    sd_card: PortableStorage,          // MicroSD card
-    
-    // Configuration resolution
-    active_config: SystemConfiguration,
-}
-
-impl RumbleDomeStorage {
-    pub fn load_configuration(&mut self) -> Result<SystemConfiguration, HalError> {
-        // 1. Load learned data from EEPROM (hardware-specific)
-        let learned_data = self.eeprom.load_learned_data()?;
-        
-        // 2. Load portable config from SD card
-        let portable_config = match self.sd_card.load_user_profiles() {
-            Ok(config) => Some(config),
-            Err(_) => {
-                log::warn!("SD card not available, using EEPROM defaults");
-                None
-            }
-        };
-        
-        // 3. Resolve configuration with priority
-        let config = SystemConfiguration::resolve(
-            portable_config,  // SD card takes precedence for user settings
-            learned_data,     // EEPROM provides hardware-specific calibration
-        )?;
-        
-        self.active_config = config;
-        Ok(self.active_config.clone())
-    }
-}
-```
-
-### MicroSD Card File Organization
-
-```
-/RUMBLEDOME/
-├── profiles/
-│   ├── daily_driver.json           # Conservative daily tune
-│   ├── sport_mode.json             # Moderate performance tune  
-│   ├── track_day.json              # Aggressive track tune
-│   ├── valet_mode.json             # Ultra-safe parking attendant mode
-│   └── winter_cold_start.json      # Cold weather adaptation
-├── config/
-│   ├── sensor_calibrations.json    # Pressure sensor parameters
-│   ├── safety_limits.json          # User-defined safety boundaries
-│   └── system_preferences.json     # Display/CAN/UI settings
-├── backups/
-│   ├── 2025-01-15_baseline.bak     # Full system backups
-│   ├── 2025-01-20_post_tune.bak    # Post-modification backup
-│   └── emergency_recovery.bak      # Known-good emergency config
-├── logs/                           # Optional session logging
-│   └── learning_sessions/
-└── firmware/                       # Future OTA updates
-    └── updates/
-```
-
-### Bluetooth Serial as Wireless Console
-
-The Bluetooth interface provides **wireless access to the exact same CLI** that works over USB-C:
-
-```rust
-// Bluetooth serial abstraction - transparent to application layer
-pub struct BluetoothSerial {
-    uart: SerialPort,
-    connection_state: BluetoothConnectionState,
-}
-
-impl SerialInterface for BluetoothSerial {
-    // Same interface as USB-C serial - transparent to CLI layer
-    fn write(&mut self, data: &[u8]) -> Result<(), HalError> {
-        self.uart.write(data)
-    }
-    
-    fn read(&mut self) -> Result<Vec<u8>, HalError> {
-        self.uart.read()
-    }
-}
-
-// CLI layer sees no difference between USB-C and Bluetooth
-pub struct ConsoleInterface<T: SerialInterface> {
-    serial: T,
-    command_parser: CommandParser,
-}
-
-// Works identically with USB-C or Bluetooth
-impl<T: SerialInterface> ConsoleInterface<T> {
-    pub fn process_command(&mut self, cmd: &str) -> Result<String, HalError> {
-        match self.command_parser.parse(cmd)? {
-            Command::Backup { output_file } => self.handle_backup(output_file),
-            Command::Restore { backup_file } => self.handle_restore(backup_file),
-            Command::Status { live_mode } => self.handle_status(live_mode),
-            Command::Config { profile } => self.handle_config_change(profile),
-            // ... same commands regardless of connection type
-        }
-    }
-}
-```
-
-### Mobile App as CLI GUI Wrapper
-
-```typescript
-// Mobile app - GUI wrapper around CLI commands
-class RumbleDomeMobileApp {
-    bluetooth: BluetoothSerial;
-    
-    // GUI actions translate directly to CLI commands
-    async downloadConfig(): Promise<BackupData> {
-        const response = await this.bluetooth.sendCommand(
-            "rumbledome backup --output mobile_backup.json --format json"
-        );
-        return JSON.parse(response);
-    }
-    
-    async uploadTune(backupData: BackupData): Promise<RestoreResult> {
-        // Transfer backup file over serial
-        await this.bluetooth.sendFile("uploaded_tune.json", backupData);
-        
-        // Execute restore command
-        const response = await this.bluetooth.sendCommand(
-            "rumbledome restore --backup-file uploaded_tune.json --format json"
-        );
-        return JSON.parse(response);
-    }
-    
-    async switchProfile(profileName: string): Promise<void> {
-        await this.bluetooth.sendCommand(
-            `rumbledome config --profile ${profileName}`
-        );
-    }
-    
-    // Real-time telemetry via live status stream
-    startLiveTelemetry(): AsyncIterator<TelemetryData> {
-        return this.bluetooth.sendCommandStream(
-            "rumbledome status --live --format json"
-        );
-    }
-}
-```
-
-### Development and Deployment Workflows
-
-**Development Scenarios**:
-```bash
-# Rapid prototyping - swap SD cards between test micros
-cp daily_driver_v2.json /Volumes/RUMBLEDOME/profiles/daily_driver.json
-# Eject SD card, move to different test micro → instant profile access
-
-# Debug with wired connection
-rumbledome status --storage-health --port /dev/ttyUSB0
-
-# Deploy with wireless connection  
-# Mobile app connects via Bluetooth → same functionality
-```
-
-**Production Deployment**:
-1. **Initial Setup**: USB-C for initial configuration and SD card setup
-2. **Daily Operation**: Mobile app via Bluetooth for profile switching and monitoring  
-3. **Service Access**: USB-C or Bluetooth for diagnostics and updates
-4. **Emergency Recovery**: SD card physical access if all else fails
-
-**Configuration Backup Strategy**:
-- **SD Card**: Portable profiles and settings (survives micro replacement)
-- **EEPROM**: Hardware-specific learned data (tied to physical micro)
-- **Mobile App**: Cloud sync of user profiles (additional backup layer)
-- **CLI Backup**: Full system backup combining both storage tiers
-
-This architecture provides **maximum flexibility** while maintaining **single-source-of-truth** for the CLI interface - whether accessed via USB-C cable or Bluetooth, the functionality is identical.
 
 ## Development Workflow
 
-### Pre-commit Validation
-1. Run all unit tests: `cargo test --workspace`
-2. Run safety-critical integration tests
-3. Lint and format: `cargo clippy && cargo fmt`
-4. Check embedded target builds: `cargo check --target thumbv7em-none-eabihf`
+### Pre-Implementation Validation
+1. **Safety requirements review** - Verify all SY-* requirements are covered
+2. **Desktop simulation** - Validate control logic without hardware
+3. **HAL mock testing** - Ensure platform independence
+4. **Integration test coverage** - All safety scenarios tested
 
-### Continuous Integration
-- Automated testing on all platforms
-- Safety requirement validation
-- Hardware-in-loop testing for releases
-- Documentation generation and deployment
+### Implementation Priority
+1. **Core control logic** - Torque-following without hardware dependencies
+2. **Safety monitoring** - All overboost and fault detection logic  
+3. **HAL implementation** - Teensy 4.1 platform support
+4. **Learning system** - Calibration and environmental adaptation
+5. **CLI and protocol** - Configuration and diagnostic interface
 
-### Release Process
-1. Version bump across workspace
-2. Full test suite execution
-3. Hardware validation testing
-4. Documentation updates  
-5. Release tag and artifact publication
+### Testing Strategy
+- **Unit tests**: All safety-critical logic with 100% coverage
+- **Integration tests**: Full system scenarios with mock hardware
+- **Hardware-in-loop**: Real pneumatic system validation before deployment
+- **Regression tests**: Automated testing of all control scenarios
+
+This implementation approach prioritizes **safety validation** and **platform independence** while maintaining the simplified user interface and ECU-cooperative control philosophy.

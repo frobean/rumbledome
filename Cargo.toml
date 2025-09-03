@@ -1,3 +1,9 @@
+# RumbleDome Workspace Configuration
+# 
+# 🔗 T4-BUILD-001: Workspace Configuration
+# Derived From: T3-BUILD-001 (Rust Workspace Architecture) + dependency management
+# AI Traceability: Organizes crate dependencies, build configuration, platform targets
+
 [workspace]
 members = [
     "crates/rumbledome-hal",
@@ -5,29 +11,95 @@ members = [
     "crates/rumbledome-protocol",
     "crates/rumbledome-fw",
     "crates/rumbledome-sim",
-    "crates/rumbledome-cli"
+    "crates/rumbledome-cli",
 ]
 
-[workspace.package]
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-authors = ["RumbleDome Team"]
-repository = "https://github.com/your-username/rumbledome"
-description = "Torque-based electronic boost controller"
+resolver = "2"
 
+# Workspace-wide dependencies
 [workspace.dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-log = "0.4"
-anyhow = "1.0"
-tokio = { version = "1.0", features = ["full"] }
-clap = { version = "4.0", features = ["derive"] }
+# Core utilities
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false }
+heapless = { version = "0.8", default-features = false }
 
-# Embedded dependencies
+# Embedded/no_std compatibility  
+nb = "1.1"
 embedded-hal = "1.0"
-nb = "1.0"
+cortex-m = "0.7"
 
-# Testing dependencies  
-mockall = "0.12"
+# Time and scheduling
+fugit = "0.3"
+
+# Error handling
+thiserror = { version = "1.0", default-features = false }
+
+# Testing utilities
+approx = "0.5"
+
+# Async runtime (for simulator)
+tokio = { version = "1.0", features = ["full"] }
+
+# CLI utilities  
+clap = { version = "4.0", features = ["derive"] }
+console = "0.15"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Configuration and serialization
+toml = "0.8"
+directories = "5.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+
+# Allow some pedantic lints that don't fit our style
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+float_cmp = "allow"              # We need exact float comparisons in some cases
+module_name_repetitions = "allow" # Common in HAL interfaces
+
+[profile.release]
+# Optimize for size and performance
+opt-level = "s"        # Optimize for size
+lto = true            # Link-time optimization
+codegen-units = 1     # Better optimization
+panic = "abort"       # Smaller binary size
+strip = true          # Remove debug symbols
+
+[profile.dev]
+# Development profile with debug info
+opt-level = 1         # Some optimization for faster compilation
+debug = true
+panic = "unwind"      # Better debugging experience
+incremental = true    # Faster recompilation
+
+[profile.test]
+# Testing profile
+opt-level = 0         # No optimization for faster test compilation
+debug = true
+panic = "unwind"
+
+# Firmware-specific profile for embedded targets
+[profile.firmware]
+inherits = "release"
+opt-level = "z"       # Maximum size optimization
+debug = false         # No debug info for embedded
+panic = "abort"       # Required for embedded
+lto = "fat"          # Maximum LTO
+
+# Simulation profile for desktop testing
+[profile.simulation]
+inherits = "dev" 
+opt-level = 2        # Some optimization for realistic performance
+debug = true         # Keep debug info for analysis

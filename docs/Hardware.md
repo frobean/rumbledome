@@ -1,6 +1,14 @@
 # RumbleDome Hardware Specifications
 
+📋 **Hardware specifications and pin assignments**: See **[TechnicalSpecs.md](TechnicalSpecs.md)** for complete technical details
+
 ## Hardware Abstraction Layer (HAL) Interface
+
+**🔗 T2-HAL-001**: **Platform-Independent Hardware Abstraction Design**  
+**Decision Type**: ⚠️ **Engineering Decision** - Multi-platform support architecture  
+**Derived From**: T1-INNOVATION-001 (Torque Request Amplification Paradigm) - system must work across different hardware platforms  
+**Engineering Rationale**: HAL abstraction enables desktop simulation, testing, and future platform expansion without core logic changes  
+**AI Traceability**: Drives interface definitions, mock implementations, platform-specific adapters
 
 The HAL provides platform-independent interfaces for all hardware components, enabling support for multiple MCU platforms and hardware configurations.
 
@@ -31,12 +39,49 @@ trait Pwm {
 }
 ```
 
-**Solenoid Drive Requirements**:
-- **Frequency**: 30 Hz nominal (20-50 Hz acceptable range)
-- **Resolution**: 0.1% duty cycle minimum resolution  
+**4-Port MAC Solenoid Specifications**:
+
+**⚙️ Solenoid Characteristics**:
+- **Type**: 4-port MAC valve (pneumatic boost control)
+- **Configuration**: Air supply → solenoid → wastegate actuator domes
+- **Control Method**: PWM duty cycle modulates air flow distribution
+- **Fail-Safe Design**: 0% duty = wastegate open (minimal boost)
+- **Operating Principle**: Proportional control of wastegate dome pressure balance
+
+**🔗 T2-HAL-004**: **4-Port MAC Solenoid Drive Requirements**  
+**Derived From**: T2-SOLENOID-001 (4-Port MAC Solenoid Selection) + automotive operating conditions  
+**Decision Type**: ⚠️ **Engineering Decision** - Driver circuit specification for automotive environment  
+**Engineering Rationale**: 12V automotive supply with wide tolerance, high-current MOSFET drive for reliable solenoid operation  
+**AI Traceability**: Drives PWM driver design, current limiting, thermal management
+
+**🔌 Electrical Drive Requirements**:
+- **Supply Voltage**: 12V nominal (9-16V operating range)
+- **Current Draw**: 2-3A typical at 12V (varies by solenoid model)
+- **PWM Frequency**: 30 Hz nominal (20-50 Hz acceptable range)
+- **Duty Cycle Range**: 0-100% with 0.1% minimum resolution
 - **Response Time**: <10ms for duty cycle changes
-- **Drive Current**: Sufficient for 4-port MAC solenoid (typically 2-3A @ 12V)
-- **Protection**: Over-current and thermal protection required
+- **Drive Circuit**: MOSFET-based high-side switching with flyback diode protection
+
+**🛡️ Protection and Safety**:
+- **Over-Current Protection**: Electronic current limiting to prevent driver damage
+- **Thermal Protection**: Temperature monitoring of driver circuit
+- **Short Circuit Protection**: Automatic shutdown on solenoid coil short
+- **Flyback Protection**: Diode clamping for inductive kickback suppression
+- **Fault Detection**: Current monitoring for open coil or short circuit conditions
+
+**⚡ Driver Circuit Specifications**:
+- **Switch Type**: N-channel MOSFET (RDS(on) <10mΩ)
+- **Current Rating**: 5A minimum continuous, 10A peak
+- **Voltage Rating**: 40V minimum (automotive transient protection)
+- **Gate Drive**: Logic-level compatible with 3.3V MCU outputs
+- **Thermal Management**: Heat sink required for continuous operation >2A
+
+**📊 Performance Characteristics**:
+- **Linearity**: Proportional relationship between duty cycle and flow rate
+- **Repeatability**: ±1% duty cycle accuracy over temperature range
+- **Temperature Coefficient**: <0.1%/°C drift over -40°C to +85°C range
+- **Mechanical Durability**: >10 million switching cycles at rated conditions
+- **Environmental Rating**: IP67 sealed connector required for automotive use
 
 ### Analog Input (Pressure Sensors)
 ```rust
@@ -95,36 +140,51 @@ struct StorageHealthReport {
 - **Predictive Analysis**: Estimate remaining lifespan based on usage patterns
 - **Human-Readable Reporting**: Console and GUI health reports with clear recommendations
 
-**💾 Storage Architecture (Teensy 4.1 FlexRAM EEPROM)**:
+**💾 Storage Architecture (MicroSD Card Primary)**:
+
+**🗂️ SD Card File Structure**:
 ```
-├── Configuration     [   0 -  512] →  512 bytes (system config, profiles)
-├── Learned Data      [ 512 - 2560] → 2048 bytes (calibration maps, environmental factors) 
-├── Calibration       [2560 - 3584] → 1024 bytes (sensor calibration, auto-cal state)
-└── Safety Log        [3584 - 4096] →  512 bytes (fault history, safety events)
+/RUMBLEDOME/
+├── config/
+│   └── user_config.json        # Only 5 parameters: aggression, spring_pressure, max_boost_psi, overboost_limit, scramble_enabled
+├── learned/
+│   ├── calibration_maps.bin     # Duty cycle calibration tables (RPM × Boost → Duty)
+│   ├── environmental.json       # Temperature/altitude compensation factors
+│   ├── sensor_fusion.json       # CAN MAP vs boost gauge cross-calibration
+│   └── safety_params.json       # Learned safety characteristics and response times
+├── backups/
+│   └── [timestamp]/             # Automatic rolling backups
+└── logs/
+    └── [date]/                  # Diagnostic and safety event logs
 ```
 
-**⚠️ Wear Management Strategy**:
-- **Write Rate Limiting**: Learning system must minimize write frequency 
-- **Batch Updates**: Only persist significant changes, not every minor adjustment
-- **Confidence Thresholds**: Only write calibration data above confidence thresholds
-- **Time-Based Persistence**: Maximum write rate limits (e.g., 1 write per minute during learning)
+**📊 Write Optimization Strategy**:
+- **Debounced Writes**: All data writes debounced 5-10 seconds to optimize SD card wear
+- **Atomic Operations**: Crash-safe writes using temp file + rename operations
+- **Change Detection**: Only persist actual configuration changes, not repeated identical writes
+- **Batch Learning Updates**: Learning system accumulates changes before writing
+- **Automatic Backups**: Rolling backup system prevents data loss from card failures
 
-**🔍 Health Monitoring Features**:
-- **Real-Time Tracking**: Write counts, timestamps, average write sizes per region
-- **Proactive Warnings**: Alerts at 80% wear (years before failure)
-- **Critical Notifications**: Urgent alerts at 95% wear with replacement timeline
-- **Usage Pattern Analysis**: Peak write rates, session statistics, uptime correlation
-- **Lifespan Estimation**: Predictive modeling based on current usage patterns
+**🔍 SD Card Health Monitoring**:
+- **Health Status Tracking**: Monitor for card errors, corruption, and write failures
+- **User Warnings**: Display notifications for SD card errors or impending failures  
+- **Graceful Degradation**: System operates safely with default parameters if SD card fails
+- **Emergency Recovery**: System continues operation without SD card using firmware defaults
 
 **Technical Specifications**:
-- **Capacity**: 4KB EEPROM emulation via FlexRAM
-- **Write Endurance**: 100,000 cycles per 512-byte region (conservative estimate)
-- **Retention**: 10+ years minimum data retention
-- **Write Speed**: Immediate persistence (no caching delays)
-- **Expected Lifespan**: 15-30 years with normal driving patterns
-- **Failure Prediction**: 2-5 years advance warning before wear-out
+- **Capacity**: 8-32GB MicroSD (Class 10 or better recommended)
+- **Filesystem**: FAT32 for maximum compatibility and easy access
+- **Write Strategy**: Debounced persistence with atomic file operations
+- **Expected Lifespan**: 10+ years with proper write management and wear leveling
+- **Failure Recovery**: System continues with defaults if SD card unavailable
 
 ### MicroSD Card Storage (Portable Configuration)
+
+**🔗 T2-HAL-002**: **Portable Storage Interface Design**  
+**Decision Type**: 🔗 **Direct Derivation** - Implementation of configuration portability  
+**Derived From**: T2-STORAGE-001 (SD Card Primary Storage) + T1-UI-001 (Single Parameter Philosophy)  
+**AI Traceability**: Drives storage management algorithms, configuration persistence, backup strategies
+
 ```rust
 trait PortableStorage {
     fn mount(&mut self) -> Result<(), HalError>;
@@ -132,57 +192,38 @@ trait PortableStorage {
     fn is_mounted(&self) -> bool;
     fn read_config_file(&mut self, filename: &str) -> Result<Vec<u8>, HalError>;
     fn write_config_file(&mut self, filename: &str, data: &[u8]) -> Result<(), HalError>;
-    fn load_user_profiles(&mut self) -> Result<UserProfileSet, HalError>;
-    fn save_user_profiles(&mut self, profiles: &UserProfileSet) -> Result<(), HalError>;
+    fn load_user_config(&mut self) -> Result<UserConfiguration, HalError>;
+    fn save_user_config(&mut self, config: &UserConfiguration) -> Result<(), HalError>;
     fn get_card_info(&self) -> Result<SdCardInfo, HalError>;
 }
 
-// Portable configuration structure
-pub struct UserProfileSet {
-    pub metadata: ProfileSetMetadata,
-    pub profiles: Vec<BoostProfile>,
-    pub sensor_calibrations: SensorCalibrations,
-    pub safety_limits: UserSafetyLimits,
-    pub system_preferences: SystemPreferences,
+**🔗 T2-HAL-003**: **5-Parameter Configuration Structure**  
+**Decision Type**: 🔗 **Direct Derivation** - Software implementation of single-knob philosophy  
+**Derived From**: T1-UI-001 (Single Parameter Philosophy)  
+**AI Traceability**: Drives configuration data structures, parameter validation, user interface
+
+// Simple 5-parameter configuration structure  
+pub struct UserConfiguration {
+    pub aggression: f32,              // 0.0-1.0 - scales all system behavior
+    pub spring_pressure: f32,         // PSI - wastegate spring pressure  
+    pub max_boost_psi: f32,          // PSI - performance ceiling
+    pub overboost_limit: f32,        // PSI - hard safety limit
+    pub scramble_enabled: bool,       // Enable scramble button feature
 }
 ```
 
-**MicroSD Storage Architecture**:
+**Single-Tier SD Card Storage**:
+- **User Configuration**: Simple 5-parameter settings stored in user_config.json
+- **Learned Data**: Hardware-specific calibration maps and environmental factors  
+- **Safety Logs**: Diagnostic and fault history for analysis
+- **Automatic Backups**: Rolling backups for data protection
 
-**🎯 Two-Tier Storage Strategy**:
-- **EEPROM (Instance-Specific)**: Learned data, auto-calibration progress, storage wear tracking
-- **MicroSD (Portable)**: User profiles, sensor calibrations, safety limits, system preferences
-
-**📁 SD Card File Structure**:
-```
-/RUMBLEDOME/
-├── profiles/
-│   ├── daily_driver.json        # User boost profiles
-│   ├── sport_mode.json
-│   ├── track_day.json
-│   └── valet_mode.json
-├── config/
-│   ├── sensor_calibrations.json # Pressure sensor parameters
-│   ├── safety_limits.json       # User safety boundaries  
-│   └── system_preferences.json  # Display/CAN/UI settings
-├── backups/
-│   ├── 2025-01-15_baseline.bak  # Full system backups
-│   └── 2025-01-20_tuned.bak
-└── firmware/
-    └── updates/                 # Future firmware updates
-```
-
-**Configuration Resolution Priority**:
-1. **SD Card Profiles**: User-defined boost profiles and preferences
-2. **EEPROM Learned Data**: Hardware-specific calibration maps and wear tracking
-3. **Firmware Defaults**: Factory fallbacks if storage unavailable
-
-**Benefits**:
-- **Hardware Independence**: Same SD card works across multiple micros
-- **Rapid Replacement**: Swap SD card to new micro → instant profile access
-- **Version Control**: Text-based JSON files compatible with git
-- **Emergency Backup**: Physical SD card survives micro failures
-- **Development Flexibility**: Easy bulk configuration management
+**Configuration Benefits**:
+- **Portability**: Same SD card works across multiple controller units
+- **Rapid Replacement**: Swap SD card to new micro → instant configuration access
+- **Version Control**: Text-based JSON files compatible with git and external editing
+- **Emergency Recovery**: Physical SD card survives controller failures
+- **Development Flexibility**: Easy configuration management and testing
 
 ### CAN Bus Interface
 ```rust
@@ -192,6 +233,12 @@ trait Can {
     fn receive_frame() -> Result<Option<CanFrame>, CanError>;
     fn set_filter(filter: CanFilter) -> Result<(), CanError>;
     fn get_stats() -> CanStats;
+    
+    // Ford S550-specific signal decoding
+    fn read_rpm(&mut self) -> Result<u16, CanError>;
+    fn read_desired_torque(&mut self) -> Result<f32, CanError>;      // TBD - need to identify signal
+    fn read_actual_torque(&mut self) -> Result<f32, CanError>;       // TBD - need to identify signal  
+    fn read_manifold_pressure(&mut self) -> Result<f32, CanError>;
 }
 ```
 
@@ -202,6 +249,30 @@ trait Can {
 - **Protection**: ESD protection and over-voltage protection required
 - **Termination**: Software-configurable 120Ω termination
 - **Error Handling**: Automatic error recovery and fault reporting
+
+**🔗 T2-HAL-005**: **Ford S550 CAN Signal Integration**  
+**Derived From**: FR-1 (ECU Integration & Cooperation) + vehicle platform requirements  
+**Decision Type**: 🚧 **TBD** - CAN signal mapping requires vehicle testing for validation  
+**Engineering Notes**: RPM confirmed, torque signals require identification through testing  
+**AI Traceability**: Drives CAN protocol implementation, signal validation, torque extraction
+
+**Ford S550 CAN Signal Integration**:
+- **RPM (0x109)**: `(b0<<8 + b1) / 4` - Engine speed for learned calibration lookups
+- **Manifold Pressure (0x167)**: `((b5-25)<<8 + b6 - 128) / 5` - CAN MAP sensor for safety monitoring
+- **Torque Signals (TBD)**: Need to determine which of these represents desired vs actual torque:
+  - **Signal A (0x167)**: `((b1-128)<<8 + b2) / 4` - "Engine load/torque" 
+  - **Signal B (0x43E)**: `(b5<<8 + b6) / 72 - 140` - "Engine load percentage"
+
+**Signal Validation Requirements**:
+- **Torque Signal Identification**: Test 0x167 and 0x43E to determine desired vs actual torque
+- **Update Rate Verification**: Measure actual CAN message frequencies for control loop timing
+- **Signal Accuracy**: Cross-reference with HPTuners data if available for validation
+- **Behavioral Analysis**: Desired torque should lead actual torque during acceleration events
+
+**Control Loop Requirements**:
+- **Minimum Update Rate**: 20-50Hz for smooth torque-following control
+- **Maximum Latency**: <50ms from ECU torque change to boost response
+- **Fault Detection**: CAN timeout detection with <500ms failsafe response
 
 ### Bluetooth Serial Interface (Wireless Console Access)
 ```rust
@@ -223,6 +294,12 @@ pub struct BluetoothConnectionInfo {
 
 **Bluetooth Architecture**:
 
+**🔗 T2-HAL-006**: **Wireless CLI Console Access**  
+**Derived From**: T1-UI-001 (Single Parameter Philosophy) + mobile accessibility requirements  
+**Decision Type**: ⚠️ **Engineering Decision** - Bluetooth SPP abstraction layer for wireless console access  
+**Engineering Rationale**: Same CLI commands over wireless eliminates duplicate interfaces, maintains consistency  
+**AI Traceability**: Drives wireless protocol abstraction, mobile app design, command consistency
+
 **🎯 Wireless Serial Port Abstraction**:
 - **Primary Purpose**: Wireless access to CLI console interface
 - **Protocol**: Standard serial communication over Bluetooth Classic (SPP)
@@ -234,7 +311,7 @@ pub struct BluetoothConnectionInfo {
 Mobile App                    Teensy 4.1 Console
     │                             │
     ├─ GUI Button ──────────────→ │ "rumbledome backup"
-    ├─ Profile Manager ─────────→ │ "rumbledome config --profile sport"  
+    ├─ Config Manager ──────────→ │ "rumbledome config --knob 0.7"  
     ├─ Live Telemetry ──────────→ │ "rumbledome status --live --format json"
     └─ Backup/Restore ──────────→ │ "rumbledome restore --backup-file tune.json"
                                   │
@@ -286,6 +363,75 @@ trait Display {
 - **Interface**: SPI (10 MHz minimum)
 - **Update Rate**: 30 Hz minimum for smooth gauge animation
 - **Viewing Angle**: Suitable for automotive dashboard mounting
+- **Integration**: Mounted in 60mm gauge pod with rotary encoder bezel
+
+### Single-Knob Control Interface
+```rust
+trait RotaryEncoder {
+    fn read_position() -> Result<i32, EncoderError>;
+    fn reset_position() -> Result<(), EncoderError>;
+    fn get_click_count() -> u32;
+    fn has_button() -> bool;
+    fn is_button_pressed() -> bool;
+}
+```
+
+**Revolutionary Control Design**:
+- **Hardware**: Rotary encoder with tactile detents (no mechanical limits)
+- **Integration**: Bezel around gauge pod rotates as the control knob
+- **Mechanical Coupling**: Offset gear-driven design for clean wire routing
+- **Resolution**: 100 clicks for 0-100% range (1% per click precision)
+- **Feedback**: Mechanical detent click confirms each adjustment
+- **Durability**: No potentiometer wear, automotive-grade encoder (IP67)
+- **UX**: Knob position directly correlates with visual display background
+
+**Offset Gear-Driven Encoder Mechanism**:
+```
+    ┌─────────────────┐ Outer Bezel
+    │  ┌───────────┐  │ 
+    │  │  DISPLAY  │  │ <- Wires route straight through center
+    │  │           │  │
+    │  └───────────┘  │
+    │              ⚙  │ <- Encoder offset near pod edge
+    └─────────────────┘
+```
+
+**Mechanical Implementation**:
+- **Bezel Design**: Internal gear teeth around inner circumference of rotating bezel
+- **Encoder Coupling**: Small pinion gear on standard rotary encoder shaft
+- **Positioning**: Encoder mounted offset near gauge pod edge, avoids center wire routing
+- **Gear Engagement**: Meshing teeth provide positive mechanical coupling (no slip/backlash)
+- **Gear Ratio Options**: 1:1 direct drive or 2:1/3:1 reduction for finer control resolution
+- **3D Printable**: Both bezel ring teeth and encoder pinion gear suitable for FDM printing
+
+**Manufacturing Advantages**:
+- **Clean center routing**: Display wires have completely unobstructed path to PCB
+- **Standard components**: Uses off-the-shelf rotary encoder, no custom electronics
+- **3D printer compatible**: Gear teeth print well with 45° chamfers, no supports needed
+- **Positive engagement**: Gear teeth eliminate slip, provide precise position feedback
+- **Balanced rotation**: Offset encoder mass provides better mechanical balance than center-mounted
+- **Serviceable**: Encoder can be replaced without disturbing display wiring
+
+**Scramble Button Override**:
+- **Function**: Instant brimstone (100%) aggression override regardless of knob position
+- **Type**: Momentary push button (normally open)
+- **Mounting**: Separate button on gauge pod or easily accessible dashboard location
+- **Visual Feedback**: Display shows "SCRAMBLE" overlay with flashing red background when active
+- **Behavior**: Hold for override, release returns to current knob setting
+- **Safety**: No latching - requires continuous pressure for activation
+
+**Dynamic UI Integration**:
+- **0-25%**: Green background with gentle pulse animation ("Puppy Dog")
+- **25-50%**: Green→Amber gradient with subtle glow ("Daily Driver") 
+- **50-75%**: Amber→Red gradient with active pulse ("Spirited")
+- **75-100%**: Red background with animated flame effects ("Brimstone")
+
+**Implementation Benefits**:
+- **No mechanical limits**: Infinite rotation prevents breakage
+- **Precise control**: Exact percentage setting via click counting
+- **Visual cohesion**: Knob position matches screen theme seamlessly
+- **Premium feel**: Industrial design integration vs aftermarket add-on
+- **Immediate feedback**: Background changes in real-time as knob turns
 - **Temperature Range**: -20°C to +70°C operating temperature
 
 ### GPIO (Digital Inputs)
@@ -348,25 +494,9 @@ trait Watchdog {
 - **I2C**: 3x I2C controllers
 - **UART**: 8x UART controllers
 
-**Pin Assignments**:
-```
-PWM Output (Solenoid):     Pin 2  (PWM1_A2)
-Analog Input 0 (Dome In):  Pin 14 (ADC1_CH0) 
-Analog Input 1 (Dome Up):  Pin 15 (ADC1_CH1)
-Analog Input 2 (MAP):      Pin 16 (ADC1_CH2)
-CAN TX:                    Pin 22 (CAN1_TX)
-CAN RX:                    Pin 23 (CAN1_RX)
-SPI Display CS:           Pin 10 (CS0)
-SPI Display DC:           Pin 9  (GPIO)
-SPI Display RST:          Pin 8  (GPIO)
-Profile Switch:           Pin 4  (GPIO + Interrupt)
-Scramble Button:          Pin 5  (GPIO + Interrupt)
-Status LED:               Pin 13 (GPIO)
-```
+**Pin Assignments**: See **[TechnicalSpecs.md](TechnicalSpecs.md)** for complete pin mapping
 
-**Power Requirements**:
-- **Input Voltage**: 12V automotive (9V-16V range)
-- **Regulation**: 5V and 3.3V rails with adequate current capacity
+**Power and Environmental Specifications**: See **[TechnicalSpecs.md](TechnicalSpecs.md)**
 - **Power Consumption**: <5W typical, <10W maximum
 - **Protection**: Reverse polarity, over-voltage, and over-current protection
 
@@ -419,15 +549,17 @@ Status LED:               Pin 13 (GPIO)
 **Added Boost Gauge Sensor**:
 - **Range**: 0-30 PSI gauge (boost measurement)
 - **Sensor Output**: 0.5V-4.5V ratiometric to 5V supply
-- **Teensy ADC Input**: 0.167V-1.5V (10kΩ+20kΩ voltage divider, 0.333 ratio)
+- **Teensy ADC Input**: 0.167V-1.5V (2kΩ+1kΩ voltage divider, 0.333 ratio)
 - **Scaling Formula**: `PSI = ((Vout - 0.167) / 1.33) * 30`
 - **Optimal**: Boost conditions (positive manifold pressure)
 - **Resolution**: 0.018 PSI with 12-bit ADC
 - **Thread**: 1/8" NPT male
 
-**Sensor Fusion Logic**:
+**Manifold Pressure Sensor Fusion Logic**:
+> **Note**: Dual sensor fusion applies ONLY to manifold pressure measurement. Dome feed line and upper dome pressure sensors use single dedicated gauges.
+
 - **Deep vacuum** (-5 PSI to -1 PSI): CAN MAP sensor primary
-- **Transition zone** (±1 PSI around atmospheric): Blended reading
+- **Transition zone** (±1 PSI around atmospheric): Blended reading  
 - **Boost range** (+1 PSI to +30 PSI): Boost gauge sensor primary
 - **Cross-calibration learning**: Automatically learns offset between sensors in overlap zone
 - **Dynamic offset compensation**: Continuously adjusts for systematic sensor differences

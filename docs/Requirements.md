@@ -1,25 +1,87 @@
 # RumbleDome Requirements
 
+📖 **Related Documentation:**
+- [Context.md](Context.md) - Design goals and philosophy behind these requirements
+- [Physics.md](Physics.md) - Physical principles that constrain these specifications  
+- [Architecture.md](Architecture.md) - System design implementing these requirements
+- [Safety.md](Safety.md) - Safety requirements that take precedence over functional requirements
+- [Definitions.md](Definitions.md) - Terminology and technical concepts used in these requirements
+
+## Control Philosophy Foundation
+
+**🏗️ TIER 1 SECTION: Foundational Philosophy**
+
+**🔗 T1-PHILOSOPHY-001**: **3-Tier Priority Hierarchy** (Reference: Context.md)  
+**Decision Type**: 🎯 **Core Creative Concept** - Inherited from Context.md  
+**AI Traceability**: This philosophy drives ALL functional requirements below
+
+RumbleDome implements a **priority hierarchy with aggression-mediated balance** that governs all system behavior:
+
+### **Priority 1: "Don't Kill My Car"** 🚨
+**Overboost is a fault condition** requiring immediate hard correction and learning integration for future prevention. The system will use maximum authority to prevent manifold pressure from exceeding the user-configured `overboost_limit`. **Always takes precedence.**
+
+### **Priority 2 & 3: Performance ⚖️ Comfort Balance**
+The `aggression` setting determines which sibling priority leads:
+
+**Priority 2: Optimize Max Boost Targeting** 🎯  
+- **High Aggression (0.8-1.0)**: Performance leads - forceful targeting of `max_boost_psi`, sharp responses
+- **Best effort to hit user's target** - Brief pressure spikes acceptable during transients
+- **Sustained elevation triggers learning adjustments** for improved control
+
+**Priority 3: Smooth Aggression-Informed Operation** ✨
+- **Low Aggression (0.0-0.3)**: Comfort leads - gentle smooth delivery, gradual responses  
+- **Medium Aggression (0.4-0.7)**: Balanced approach between performance and comfort
+- **Control character shaped by learned operational patterns** and user preference
+
+---
+
+## 🏗️ TIER 2 SECTION: Derived Functional Requirements
+
+**All specifications below are 🔗 Direct Derivations from Tier 1 concepts above**
+
 ## Functional Requirements
 
 ### FR-1: ECU Integration & Cooperation
+
+**🔗 T2-ECU-001**: **Torque Production Assistant**  
+**Derived From**: T1-TORQUE-001 (ECU Cooperation Philosophy)  
+**Decision Type**: 🔗 **Direct Derivation** - Logical implementation of cooperation concept  
+**AI Traceability**: Drives CAN interface requirements, control algorithms
+
 - **Torque Production Assistant**: System monitors ECU torque requests and delivery, modulating boost to help ECU achieve torque targets
 - **Final Torque Respect**: Respond to ECU's final desired_torque (after all safety systems have applied modifications) to avoid conflicts
 - **Automatic Safety Integration**: Automatically cooperate with traction control, ABS, clutch protection, and other ECU safety systems without specific programming
 - **Torque Target Strategy**: Target actual_torque at configurable percentage below desired_torque ceiling (default ~95%) to prevent harsh ECU interventions
 - **Predictable Response**: Provide consistent, repeatable boost response so ECU's driver demand tables remain valid across all operating conditions
 
-### FR-2: Boost-Based Profile Management
+### FR-2: Single-Knob Control System
+
+**🔗 T2-CONFIG-001**: **Pressure-Based Configuration**  
+**Derived From**: T1-UI-001 (Single Parameter Philosophy)  
+**Decision Type**: 🔗 **Direct Derivation** - Simplification principle applied to configuration  
+**AI Traceability**: Drives user interface specifications, configuration storage
+
 - **Boost Pressure Configuration**: All user configuration in pressure units (PSI/kPa), never raw duty cycles or power targets
-- **Engine-Specific Profiles**: User configures boost pressure limits based on their specific engine's safe operating parameters
-- **Profile Types**: Support multiple boost profiles with distinct use cases:
-  - **Valet**: 0-2 psi max (near naturally-aspirated operation for inexperienced drivers)
-  - **Daily**: Conservative boost curve for comfortable daily driving power increase  
-  - **Aggressive**: Moderate boost curve for spirited driving
-  - **Track**: Maximum safe boost curve for experienced drivers/track use
-- **Boost vs Power Independence**: Profiles define boost pressure limits; actual power output depends on engine tune, turbo sizing, and other vehicle-specific factors
-- **Live Profile Switching**: Safe switching between profiles during operation
-- **System Parameters**: Configurable wastegate spring pressure, overboost limits, overboost hysteresis per profile
+- **Single Knob Control**: One control knob (0.0-1.0) replaces all profile complexity:
+  - **0.0% (OFF Requirement)**: System OFF - as close to naturally aspirated operation as physically possible
+    - 0% duty cycle (wastegate fully open)
+    - Zero boost assistance to ECU torque requests
+    - Infinite torque error deadband (ignore all ECU torque demands)
+    - **Full Dome Control Requirement**: The "OFF" behavior only applies to full dome control systems where 0% duty sends full pressure to lower dome. Half dome systems maintain spring pressure as lower bound.
+    - **Physical Limitation Acknowledgment**: Even with wastegate fully open, high exhaust energy may spin the turbos hard enough to force some boost into the intake manifold under certain conditions. This is unavoidable in absence of the ability to open the blowoff valves. Which is, as said, absent.
+  - **1-99%**: Variable aggression scaling of torque-following assistance
+  - **100%**: Maximum system aggression (instant ECU torque request assistance)
+- **User Configuration Responsibility**: Users have full responsibility for setting appropriate limits for their engine/turbo configuration
+- **System Guidance Role**: Provides intelligent warnings and learned suggestions, never enforcement of limits beyond overboost protection
+- **Five Simple Configuration Values**:
+  - `aggression` (0.0-1.0) - Single aggression control integrated with system operation
+  - `spring_pressure` (PSI) - wastegate spring pressure
+  - `max_boost_psi` (PSI) - safety ceiling for boost pressure (not knob-scaled target)
+  - `overboost_limit` (PSI) - hard safety fault threshold (never exceed)
+  - `scramble_enabled` (bool) - temporary higher performance mode toggle
+- **Scramble Override**: Instant 100% aggression override via momentary button (non-latching)
+- **Live Adjustment**: Safe aggression adjustment during operation via rotary encoder
+- **Aggression Persistence**: Debounced NVRAM storage - aggression changes persist only after 5-10 seconds of stability to prevent wear during adjustment sessions
 
 ### FR-3: Auto-Calibration System
 - **Progressive Learning**: System learns duty cycle mappings for boost targets through safe, progressive calibration runs
@@ -33,6 +95,13 @@
 - **Real-time Health Monitoring**: Monitor pneumatic system performance and detect suboptimal configurations
 - **Optimization Recommendations**: Provide specific recommendations for air supply pressure adjustments
 - **Response Time Validation**: Verify that overboost pressure dumps can occur within required timeframes
+- **Closed-Bias Wastegate Control**: Optional efficiency mode that keeps wastegate closed until boost limiting is needed
+  - Reduces compressed air consumption from dome leakage during normal operation
+  - Eliminates atmospheric wastegate dump noise at times when the wastegates can be closed without impacting delivered boost (such as when cruising or idling at vacuum)
+  - Uses predictive threshold to maintain system responsiveness
+  - **Safety Override**: Closed-bias mode is overridden by safety systems - any fault condition forces 0% duty cycle (wastegate open) regardless of closed-bias setting
+  - Always respects 0% OFF setting and safety cuts
+  - Emulates ultra-low virtual spring pressure without physical limitations during normal operation
 
 ### FR-5: Safety & Fault Management
 - **Overboost Protection**: Immediate duty cut to 0% when manifold pressure exceeds configured limits
@@ -46,6 +115,8 @@
 - **Environmental Compensation**: Learn compensation factors for temperature, altitude, and supply pressure variations
 - **Confidence Tracking**: Track calibration confidence and data quality metrics
 - **Separate Storage**: Learned data stored separately from user configuration
+
+📋 **Complete learning specification**: See **[LearnedData.md](LearnedData.md)** for detailed requirements on all learned parameters
 
 ### FR-7: User Interface & Monitoring
 - **Real-time Display**: TFT display showing boost gauge, targets, calibration progress, pneumatic health
@@ -88,9 +159,5 @@
 - Boost pressure configuration only (power output varies by engine setup)
 
 ### Future Phase Scope (Phase 2+: "Beyond RumbleDome")
-- **Delivery Style Integration**: Drive modes affect boost delivery aggressiveness, not power levels
-  - Power Level (Profile): What boost/power you get (user selected)
-  - Delivery Style (Drive Mode): How that power is delivered (Normal/Sport+/Track aggressiveness)
-- **Advanced Predictive Control**: Throttle position integration for anticipatory boost management
 - **Multi-variable Environmental Compensation**: Advanced algorithms for temperature, altitude, humidity
 - **Platform Expansion**: Support for additional vehicle CAN protocols and engine platforms

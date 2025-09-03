@@ -65,7 +65,7 @@ crates/
 - Hardware abstraction layer and mock implementation
 
 **Phase 2 ("Beyond RumbleDome")** 🚧 PLANNED
-- **Power Level (Profile)**: What boost/power you get (user-selected)
+- **Power Level (Control Knob)**: What boost/power you get (single knob: 0-100%)
 - **Delivery Style (Drive Mode)**: How that power is delivered (Normal/Sport+/Track aggressiveness)
 - **Safety Benefit**: Drive mode changes don't automatically increase power
 
@@ -94,17 +94,17 @@ crates/
 
 ## Configuration Philosophy
 
-**Boost-Based Profiles (Not Power-Based)**:
+**Control Knob-Based (Not Power-Based)**:
 - All user configuration in **pressure units (PSI/kPa)**, never raw duty cycles or power targets
 - Same boost pressure produces different power depending on engine tune, turbo sizing, environmental conditions
 - Engine-agnostic approach - works with any engine setup within boost pressure constraints
 - User responsibility to determine appropriate boost limits for their specific engine
 
-**Profile Strategy**:
-- **Valet**: 0-2 PSI (near naturally-aspirated for inexperienced drivers)
-- **Daily**: Conservative boost curve for comfortable daily driving
-- **Aggressive**: Moderate boost curve for spirited driving
-- **Track**: Maximum safe boost curve for experienced drivers/track use
+**Control Knob Strategy**:
+- **0% (Valet)**: Minimal torque amplification (near naturally-aspirated for inexperienced drivers)
+- **~30% (Daily)**: Conservative torque amplification for comfortable daily driving
+- **~70% (Sport)**: Moderate torque amplification for spirited driving  
+- **100% (Track)**: Maximum torque amplification for experienced drivers/track use
 
 ## Current Implementation Status
 

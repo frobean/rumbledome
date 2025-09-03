@@ -1,693 +1,342 @@
 //! RumbleDome Core Control Logic
 //! 
-//! Hardware-independent implementation of the torque-based boost controller.
-//! This crate contains all business logic, safety systems, and control algorithms
-//! without any direct hardware dependencies.
+//! 🔗 T4-CORE-001: Core Control Architecture
+//! Derived From: T3-BUILD-003 (Core Control State Machine) + T2-CONTROL-003 (3-Level Control Hierarchy)
+//! Decision Type: 🔗 Direct Derivation - Implementation of hardware-independent control logic
+//! AI Traceability: Enables desktop testing, safety-critical algorithm validation
+
+#![no_std]
+
+extern crate alloc;
+use alloc::vec::Vec;
+use alloc::string::String;
 
 pub mod config;
 pub mod state;
 pub mod control;
-pub mod safety;
-pub mod calibration;
 pub mod learning;
-pub mod error;
+pub mod safety;
+pub mod torque_following;
 
 pub use config::*;
 pub use state::*;
 pub use control::*;
-pub use safety::*;
-pub use calibration::*;
 pub use learning::*;
-pub use error::*;
+pub use safety::*;
+pub use torque_following::*;
 
-use rumbledome_hal::{HalTrait, SystemInputs, ManifoldPressureFusion, SensorFusionConfig};
-use crate::calibration::{CalibrationAction};
-use crate::state::{FaultCode};
-use std::time::Instant;
+use rumbledome_hal::{HalTrait, HalResult, HalError};
 
-/// Main RumbleDome controller
+/// Core system error types
 /// 
-/// Coordinates all subsystems and implements the primary control loop.
-/// Generic over HAL implementation to support multiple platforms.
+/// 🔗 T4-CORE-002: Error Classification System
+/// Derived From: Safety.md fault response hierarchy
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoreError {
+    /// Configuration validation failed
+    ConfigurationError(String),
+    /// Hardware abstraction layer error
+    HalError(HalError),
+    /// Safety limit violation detected
+    SafetyViolation(String),
+    /// Learning system error
+    LearningError(String),
+    /// CAN communication error
+    CanError(String),
+    /// System not in valid state for operation
+    InvalidState(String),
+    /// Calibration process error
+    CalibrationError(String),
+    /// Sensor validation failed
+    SensorError(String),
+}
+
+impl From<HalError> for CoreError {
+    fn from(error: HalError) -> Self {
+        CoreError::HalError(error)
+    }
+}
+
+/// Main RumbleDome control system
+/// 
+/// 🔗 T4-CORE-003: RumbleDome Core Implementation
+/// Derived From: T3-BUILD-003 + T2-CONTROL-001 (Priority Hierarchy Implementation)
+/// AI Traceability: Central coordination of all system functions
 pub struct RumbleDomeCore<H: HalTrait> {
     /// Current system state
-    state: SystemState,
-    
-    /// User configuration
-    config: SystemConfig,
-    
+    pub state: SystemState,
+    /// User configuration (5 parameters)
+    pub config: SystemConfig,
     /// Learned calibration data
-    learned_data: LearnedData,
-    
-    /// Control loop implementation
-    control_loop: ControlLoop,
-    
+    pub learned_data: LearnedData,
+    /// Torque-following control logic
+    pub torque_following: TorqueFollowing,
     /// Safety monitoring system
-    safety_monitor: SafetyMonitor,
-    
+    pub safety_monitor: SafetyMonitor,
     /// Auto-calibration system
-    calibration: AutoCalibration,
-    
+    pub calibration: AutoCalibration,
     /// Hardware abstraction layer
-    hal: H,
-    
-    /// Sensor fusion for manifold pressure
-    sensor_fusion: ManifoldPressureFusion,
-    
-    /// Last control loop execution time
-    last_execution: Option<Instant>,
+    pub hal: H,
+    /// Control loop statistics
+    pub stats: ControlLoopStats,
+}
+
+/// System inputs from sensors and CAN
+/// 
+/// 🔗 T4-CORE-004: System Input Structure
+/// Derived From: T2-HAL-005 (Ford S550 CAN Signal Integration) + sensor specifications
+#[derive(Debug, Clone)]
+pub struct SystemInputs {
+    /// Engine RPM from CAN
+    pub rpm: u16,
+    /// Desired torque from ECU (Nm)
+    pub desired_torque: f32,
+    /// Actual torque from ECU (Nm) 
+    pub actual_torque: f32,
+    /// Manifold pressure (PSI gauge)
+    pub manifold_pressure: f32,
+    /// Dome input pressure (PSI gauge)
+    pub dome_input_pressure: f32,
+    /// Upper dome pressure (PSI gauge) 
+    pub upper_dome_pressure: f32,
+    /// Lower dome pressure (PSI gauge)
+    pub lower_dome_pressure: f32,
+    /// Current aggression setting (0.0-1.0)
+    pub aggression: f32,
+    /// Scramble button state
+    pub scramble_active: bool,
+    /// System timestamp (milliseconds)
+    pub timestamp_ms: u32,
+}
+
+/// Control loop performance statistics
+/// 
+/// 🔗 T4-CORE-005: Performance Monitoring
+/// Derived From: Performance requirements + diagnostic needs
+#[derive(Debug, Clone, Default)]
+pub struct ControlLoopStats {
+    /// Total control cycles executed
+    pub cycles_executed: u64,
+    /// Average cycle time (microseconds)
+    pub avg_cycle_time_us: u32,
+    /// Maximum cycle time (microseconds)
+    pub max_cycle_time_us: u32,
+    /// Control cycles that exceeded target timing
+    pub timing_violations: u32,
+    /// Safety interventions triggered
+    pub safety_interventions: u32,
+    /// Learning updates applied
+    pub learning_updates: u32,
+    /// Last update timestamp
+    pub last_update_ms: u32,
 }
 
 impl<H: HalTrait> RumbleDomeCore<H> {
-    /// Create new RumbleDome controller instance
-    pub fn new(hal: H, config: SystemConfig) -> Result<Self, CoreError> {
-        Ok(Self {
+    /// Create new RumbleDome core instance
+    /// 
+    /// 🔗 T4-CORE-006: System Initialization
+    /// Derived From: T3-BUILD-003 (Core Control State Machine)
+    pub fn new(hal: H, config: SystemConfig) -> Self {
+        Self {
             state: SystemState::Initializing,
             config,
             learned_data: LearnedData::default(),
-            control_loop: ControlLoop::new()?,
+            torque_following: TorqueFollowing::new(),
             safety_monitor: SafetyMonitor::new(),
             calibration: AutoCalibration::new(),
             hal,
-            sensor_fusion: ManifoldPressureFusion::new(SensorFusionConfig::default()),
-            last_execution: None,
-        })
+            stats: ControlLoopStats::default(),
+        }
     }
     
-    /// Initialize the system
+    /// Initialize system and perform self-test
+    /// 
+    /// 🔗 T4-CORE-007: System Initialization Process
+    /// Derived From: T1-SAFETY-002 (Defense in Depth) + startup requirements
     pub fn initialize(&mut self) -> Result<(), CoreError> {
-        log::info!("Initializing RumbleDome system");
+        self.state = SystemState::Initializing;
         
-        // TODO: Load configuration and learned data from storage
-        // TODO: Verify hardware functionality
-        // TODO: Perform system self-tests
+        // Initialize hardware
+        self.hal.init()?;
         
+        // Perform self-test
+        let self_test = self.hal.self_test()?;
+        if self_test.overall_status != rumbledome_hal::TestStatus::Pass {
+            self.state = SystemState::Fault(FaultCode::SelfTestFailed);
+            return Err(CoreError::SafetyViolation("Hardware self-test failed".to_string()));
+        }
+        
+        // Load learned data
+        self.learned_data = LearnedData::load_from_storage(&mut self.hal)?;
+        
+        // Initialize safety monitor
+        self.safety_monitor.initialize(&self.config)?;
+        
+        // Transition to idle state
         self.state = SystemState::Idle;
-        log::info!("RumbleDome initialization complete");
+        
         Ok(())
     }
     
-    /// Execute one iteration of the main control loop
+    /// Execute one control cycle
     /// 
-    /// Should be called at 100Hz (every 10ms) for proper operation.
+    /// 🔗 T4-CORE-008: Main Control Loop Implementation
+    /// Derived From: T3-BUILD-005 (3-Level Control Hierarchy Implementation)
+    /// Must be called at 100 Hz for proper system operation
     pub fn execute_control_cycle(&mut self) -> Result<(), CoreError> {
-        let start_time = Instant::now();
+        let cycle_start = self.hal.now_us();
+        self.stats.cycles_executed += 1;
         
-        // Validate timing constraints
-        if let Some(last) = self.last_execution {
-            let elapsed = start_time.duration_since(last);
-            if elapsed.as_millis() > 15 {
-                log::warn!("Control loop timing violation: {}ms", elapsed.as_millis());
-            }
-        }
+        // Read system inputs
+        let inputs = self.read_system_inputs()?;
         
-        // Read all system inputs
-        let inputs = self.read_inputs()?;
-        self.validate_inputs(&inputs)?;
+        // Validate inputs and check safety conditions
+        self.safety_monitor.validate_inputs(&inputs)?;
         
-        // Execute control logic based on current state
+        // Execute control based on current state
         match self.state {
-            SystemState::Initializing => {
-                // Initialization should be complete by now
-                return Err(CoreError::InvalidState("Still initializing during control loop".into()));
-            },
-            
             SystemState::Idle => {
-                // Monitor for arming conditions
-                if self.check_arming_conditions(&inputs)? {
-                    self.state = SystemState::Armed;
-                    log::info!("System armed for boost control");
-                }
-                
-                // Maintain 0% duty cycle in idle
-                self.set_solenoid_output(0.0)?;
+                // System idle - minimal boost operation
+                self.hal.set_duty_cycle(0.0)?;
             },
             
             SystemState::Armed => {
-                // Execute main control logic
-                self.execute_armed_control(&inputs)?;
+                // Normal operation - execute 3-level control hierarchy
+                let duty_cycle = self.execute_control_hierarchy(&inputs)?;
+                self.update_output(duty_cycle, &inputs)?;
+                
+                // Update learning system
+                self.learned_data.update_from_operation(&inputs, duty_cycle)?;
             },
             
             SystemState::Calibrating(_) => {
-                // Execute calibration sequence
-                self.execute_calibration_control(&inputs)?;
+                // Auto-calibration in progress
+                let duty_cycle = self.calibration.execute_step(&inputs, &mut self.learned_data)?;
+                self.update_output(duty_cycle, &inputs)?;
             },
             
             SystemState::OverboostCut => {
-                // Safety cut - maintain 0% duty until recovery
-                self.set_solenoid_output(0.0)?;
+                // Overboost protection active - force 0% duty
+                self.hal.set_duty_cycle_immediate(0.0)?;
                 
-                if self.check_overboost_recovery(&inputs)? {
+                // Check if we can return to normal operation
+                if inputs.manifold_pressure < (self.config.overboost_limit - 0.5) {
                     self.state = SystemState::Armed;
-                    log::info!("Recovered from overboost condition");
                 }
             },
             
             SystemState::Fault(_) => {
-                // Maintain safe state until fault cleared
-                self.set_solenoid_output(0.0)?;
-                
-                if self.check_fault_recovery(&inputs)? {
-                    self.state = SystemState::Idle;
-                    log::info!("Fault condition cleared");
-                }
+                // System fault - maintain failsafe state
+                self.hal.set_duty_cycle_immediate(0.0)?;
+            },
+            
+            SystemState::Initializing => {
+                // Still initializing - maintain safe state
+                self.hal.set_duty_cycle(0.0)?;
             },
         }
         
-        // Update learning data if appropriate
-        self.update_learning(&inputs)?;
-        
-        // Record execution timing
-        self.last_execution = Some(start_time);
+        // Update performance statistics
+        let cycle_time = (self.hal.now_us() - cycle_start) as u32;
+        self.update_performance_stats(cycle_time);
         
         Ok(())
     }
     
-    /// Get current system state
-    pub fn get_state(&self) -> &SystemState {
-        &self.state
-    }
-    
-    /// Get current configuration
-    pub fn get_config(&self) -> &SystemConfig {
-        &self.config
-    }
-    
-    /// Update system configuration
-    pub fn update_config(&mut self, config: SystemConfig) -> Result<(), CoreError> {
-        // TODO: Validate configuration
-        self.config = config;
-        log::info!("Configuration updated");
-        Ok(())
-    }
-    
-    /// Start calibration sequence
-    pub fn start_calibration(&mut self, target_rpm: u16, target_boost: f32) -> Result<(), CoreError> {
-        if !matches!(self.state, SystemState::Armed | SystemState::Idle) {
-            return Err(CoreError::InvalidState("Cannot start calibration in current state".into()));
-        }
-        
-        let calibration_state = CalibrationState::Conservative {
-            target_rpm,
-            target_boost,
-            runs_completed: 0,
-        };
-        
-        self.state = SystemState::Calibrating(calibration_state);
-        self.calibration.start_session(target_rpm, target_boost)?;
-        
-        log::info!("Started calibration: {} RPM, {} PSI", target_rpm, target_boost);
-        Ok(())
-    }
-    
-    // Private implementation methods...
-    
-    fn read_inputs(&mut self) -> Result<SystemInputs, CoreError> {
-        use rumbledome_hal::{AnalogChannel, AnalogReader, CanBus, TimeProvider};
-        
-        let timestamp_ms = self.hal.now_ms();
-        
-        // Read pressure sensors
-        let dome_input_pressure = self.hal.read_pressure_psi(AnalogChannel::DomeInputPressure)
-            .map_err(|e| CoreError::hardware(e))?;
-        let upper_dome_pressure = self.hal.read_pressure_psi(AnalogChannel::UpperDomePressure)
-            .map_err(|e| CoreError::hardware(e))?;
-        let manifold_pressure_gauge = self.hal.read_pressure_psi(AnalogChannel::ManifoldPressure)
-            .map_err(|e| CoreError::hardware(e))?;
-        
-        let sensors = rumbledome_hal::SensorReadings {
-            dome_input_pressure,
-            upper_dome_pressure,
-            manifold_pressure_gauge,
-            timestamp_ms,
-        };
-        
-        // Read CAN data - TODO: Parse actual CAN messages
-        // For now, return default values - needs CAN protocol implementation
-        let can = rumbledome_hal::CanData::default();
-        
-        // Combine manifold pressure readings using sensor fusion
-        let combined_manifold_pressure = self.sensor_fusion.combine_manifold_readings(&can, &sensors)
-            .map_err(|e| CoreError::hardware(e))?;
-        
-        // Validate sensor fusion result
-        self.sensor_fusion.validate_reading(&combined_manifold_pressure)
-            .map_err(|e| CoreError::hardware(e))?;
-        
-        // Update atmospheric baseline for learning
-        if can.rpm < 500 {
-            self.sensor_fusion.update_atmospheric_baseline(
-                self.learned_data.environmental_factors.atmospheric_pressure_baseline
-            );
-        }
-        
-        Ok(rumbledome_hal::SystemInputs {
-            sensors,
-            can,
-            combined_manifold_pressure,
-            timestamp_ms,
+    /// Read all system inputs from sensors and CAN
+    fn read_system_inputs(&mut self) -> Result<SystemInputs, CoreError> {
+        // Implementation would read from HAL interfaces
+        // This is a placeholder structure
+        Ok(SystemInputs {
+            rpm: 0,
+            desired_torque: 0.0,
+            actual_torque: 0.0,
+            manifold_pressure: 0.0,
+            dome_input_pressure: 0.0,
+            upper_dome_pressure: 0.0,
+            lower_dome_pressure: 0.0,
+            aggression: self.config.aggression,
+            scramble_active: false,
+            timestamp_ms: self.hal.now_ms(),
         })
     }
     
-    fn validate_inputs(&self, inputs: &SystemInputs) -> Result<(), CoreError> {
-        let sensors = &inputs.sensors;
-        let can = &inputs.can;
+    /// Execute 3-level control hierarchy
+    fn execute_control_hierarchy(&mut self, inputs: &SystemInputs) -> Result<f32, CoreError> {
+        // LEVEL 1: Torque-Based Boost Target Adjustment
+        let torque_gap = inputs.desired_torque - inputs.actual_torque;
+        let assistance_needed = self.torque_following.analyze_assistance_need(torque_gap, inputs)?;
         
-        // Validate sensor ranges
-        let ranges = &self.config.safety.sensor_ranges;
-        
-        // Check dome input pressure
-        let (min_dome, max_dome) = ranges.dome_input_pressure;
-        if sensors.dome_input_pressure < min_dome || sensors.dome_input_pressure > max_dome {
-            return Err(CoreError::input_validation(format!(
-                "Dome input pressure out of range: {:.1} PSI", sensors.dome_input_pressure
-            )));
-        }
-        
-        // Check manifold pressure
-        let (min_map, max_map) = ranges.manifold_pressure;
-        if sensors.manifold_pressure_gauge < min_map || sensors.manifold_pressure_gauge > max_map {
-            return Err(CoreError::input_validation(format!(
-                "Manifold pressure out of range: {:.1} PSI", sensors.manifold_pressure_gauge
-            )));
-        }
-        
-        // Validate CAN data freshness
-        let can_age = inputs.timestamp_ms.saturating_sub(can.timestamp_ms);
-        if can_age > self.config.safety.can_timeout_ms {
-            return Err(CoreError::input_validation(format!(
-                "CAN data timeout: {}ms old", can_age
-            )));
-        }
-        
-        // Validate RPM is reasonable
-        if can.rpm > self.config.safety.max_rpm {
-            return Err(CoreError::input_validation(format!(
-                "RPM too high: {} > {}", can.rpm, self.config.safety.max_rpm
-            )));
-        }
-        
-        Ok(())
-    }
-    
-    fn check_arming_conditions(&self, inputs: &SystemInputs) -> Result<bool, CoreError> {
-        let can = &inputs.can;
-        
-        // Engine must be running
-        if can.rpm < self.config.safety.min_rpm_for_arming {
-            return Ok(false);
-        }
-        
-        // Must have valid torque data
-        if can.desired_torque <= 0.0 || can.actual_torque <= 0.0 {
-            return Ok(false);
-        }
-        
-        // No active faults
-        if matches!(self.state, SystemState::Fault(_)) {
-            return Ok(false);
-        }
-        
-        // All sensors must be reading reasonable values
-        let sensors = &inputs.sensors;
-        
-        // Manifold pressure should not be in deep vacuum when engine running
-        if sensors.manifold_pressure_gauge < -10.0 {
-            return Ok(false);
-        }
-        
-        // Dome system should have adequate pressure
-        if sensors.dome_input_pressure < 5.0 {
-            return Ok(false);
-        }
-        
-        Ok(true)
-    }
-    
-    fn execute_armed_control(&mut self, inputs: &SystemInputs) -> Result<(), CoreError> {
-        // Get active profile
-        let active_profile = self.config.get_active_profile()
-            .ok_or_else(|| CoreError::configuration("No active profile configured"))?;
-        
-        // Execute 3-level control hierarchy
-        let control_result = self.control_loop.execute_cycle(
-            inputs,
-            &self.config,
-            &self.learned_data,
-            active_profile,
-        )?;
-        
-        // Apply safety overrides
-        let safety_action = self.safety_monitor.check_safety(
-            inputs,
-            &self.config,
-            active_profile,
-            control_result.duty_cycle,
-        )?;
-        
-        let final_duty = match safety_action {
-            crate::safety::SafetyAction::Continue => control_result.duty_cycle,
-            crate::safety::SafetyAction::ImmediateCut { reason } => {
-                log::warn!("Safety cut: {}", reason);
-                self.state = SystemState::OverboostCut;
-                0.0
-            },
-            crate::safety::SafetyAction::MaintainCut { reason } => {
-                log::debug!("Maintaining safety cut: {}", reason);
-                0.0
-            },
-            crate::safety::SafetyAction::AllowRecovery { message } => {
-                log::info!("Safety recovery: {}", message);
-                control_result.duty_cycle
-            },
-            crate::safety::SafetyAction::LimitDuty { max_duty, reason } => {
-                log::warn!("Duty limited: {}", reason);
-                control_result.duty_cycle.min(max_duty)
-            },
+        // LEVEL 2: Precise Boost Delivery (PID + Learned Calibration)
+        let target_boost = if assistance_needed {
+            self.torque_following.calculate_boost_assistance(torque_gap, inputs)?
+        } else {
+            self.torque_following.get_baseline_boost(inputs)?
         };
         
-        // Update solenoid output
-        self.set_solenoid_output(final_duty)?;
+        // LEVEL 3: Safety and Output
+        let target_duty = self.learned_data.boost_to_duty_conversion(target_boost, inputs)?;
+        let safe_duty = self.safety_monitor.validate_and_limit(target_duty, inputs)?;
         
-        // Update learning system with control result
-        if control_result.boost_error.abs() < 0.5 {
-            // Only learn from accurate control
-            self.learned_data.update_calibration_point(
-                inputs.can.rpm,
-                control_result.target_boost,
-                inputs.sensors.manifold_pressure_gauge,
-                final_duty,
-                inputs.timestamp_ms,
-            )?;
-        }
+        Ok(safe_duty)
+    }
+    
+    /// Update PWM output with safety validation
+    fn update_output(&mut self, duty_cycle: f32, inputs: &SystemInputs) -> Result<(), CoreError> {
+        // Apply aggression scaling
+        let final_duty = self.apply_aggression_scaling(duty_cycle)?;
         
-        // Log control diagnostics
-        for diagnostic in &control_result.diagnostics {
-            log::debug!("Control: {}", diagnostic);
-        }
+        // Update PWM with timing synchronization
+        self.hal.set_duty_cycle_synchronized(final_duty, self.hal.now_us())?;
         
         Ok(())
     }
     
-    fn execute_calibration_control(&mut self, inputs: &SystemInputs) -> Result<(), CoreError> {
-        // Get current calibration duty cycle
-        let calibration_duty = self.calibration.get_current_duty_cycle();
+    /// Apply aggression-based scaling to duty cycle
+    fn apply_aggression_scaling(&self, base_duty: f32) -> Result<f32, CoreError> {
+        // Aggression scales response characteristics
+        let response_profile = self.config.get_response_characteristics();
+        let scaled_duty = base_duty * response_profile.torque_following_gain;
         
-        // Process calibration cycle
-        let calibration_result = self.calibration.process_calibration_cycle(
-            inputs,
-            &self.config,
-            &mut self.learned_data,
-        )?;
+        Ok(scaled_duty.clamp(0.0, 100.0))
+    }
+    
+    /// Update control loop performance statistics
+    fn update_performance_stats(&mut self, cycle_time_us: u32) {
+        self.stats.avg_cycle_time_us = 
+            (self.stats.avg_cycle_time_us * 7 + cycle_time_us) / 8; // Rolling average
         
-        // Update system state based on calibration result
-        match calibration_result.next_action {
-            CalibrationAction::Complete => {
-                self.state = SystemState::Armed;
-                log::info!("Calibration completed successfully");
-            },
-            CalibrationAction::Abort { reason } => {
-                self.state = SystemState::Fault(FaultCode::SafetyFault {
-                    check: "calibration".to_string(),
-                    details: reason,
-                });
-                log::error!("Calibration aborted");
-            },
-            _ => {
-                // Continue calibration - maintain current state
-                if let SystemState::Calibrating(ref mut cal_state) = self.state {
-                    if let Some(new_cal_state) = self.calibration.get_calibration_state() {
-                        *cal_state = new_cal_state;
-                    }
-                }
-            }
+        if cycle_time_us > self.stats.max_cycle_time_us {
+            self.stats.max_cycle_time_us = cycle_time_us;
         }
         
-        // Set solenoid output for calibration
-        self.set_solenoid_output(calibration_duty)?;
-        
-        Ok(())
-    }
-    
-    fn check_overboost_recovery(&self, inputs: &SystemInputs) -> Result<bool, CoreError> {
-        // Get current active profile for recovery thresholds
-        let active_profile = self.config.get_active_profile()
-            .ok_or_else(|| CoreError::configuration("No active profile for overboost recovery"))?;
-        
-        let current_pressure = inputs.sensors.manifold_pressure_gauge;
-        let recovery_threshold = active_profile.overboost_limit - active_profile.overboost_hysteresis;
-        
-        // Recovery allowed when pressure drops below threshold
-        Ok(current_pressure < recovery_threshold)
-    }
-    
-    fn check_fault_recovery(&self, inputs: &SystemInputs) -> Result<bool, CoreError> {
-        // Check if fault conditions have cleared
-        match &self.state {
-            SystemState::Fault(fault_code) => {
-                match fault_code {
-                    FaultCode::SensorFault { .. } => {
-                        // Try to validate inputs - if they pass, fault is cleared
-                        self.validate_inputs(inputs).is_ok()
-                    },
-                    FaultCode::CanTimeout { .. } => {
-                        // Check if CAN data is fresh
-                        let can_age = inputs.timestamp_ms.saturating_sub(inputs.can.timestamp_ms);
-                        can_age < self.config.safety.can_timeout_ms
-                    },
-                    FaultCode::HardwareFault { .. } |
-                    FaultCode::SafetyFault { .. } |
-                    FaultCode::WatchdogTimeout => {
-                        // These require manual intervention
-                        false
-                    },
-                    _ => {
-                        // Other faults may be recoverable
-                        true
-                    }
-                }
-            },
-            _ => true, // Not in fault state
-        }
-    }
-    
-    fn update_learning(&mut self, inputs: &SystemInputs) -> Result<(), CoreError> {
-        // Update environmental factors based on current conditions
-        let current_supply = inputs.sensors.dome_input_pressure;
-        let supply_baseline = self.learned_data.environmental_factors.supply_pressure_baseline;
-        
-        // Exponential moving average for supply pressure baseline
-        let alpha = 0.01; // Slow adaptation
-        let new_supply_baseline = supply_baseline * (1.0 - alpha) + current_supply * alpha;
-        self.learned_data.environmental_factors.supply_pressure_baseline = new_supply_baseline;
-        
-        // Update atmospheric pressure baseline from manifold pressure when engine off
-        if inputs.can.rpm < 500 {
-            // Engine off - manifold pressure should be atmospheric
-            let current_atmospheric = inputs.sensors.manifold_pressure_gauge + 14.7; // Convert gauge to absolute
-            let atm_baseline = self.learned_data.environmental_factors.atmospheric_pressure_baseline;
-            let new_atm_baseline = atm_baseline * (1.0 - alpha) + current_atmospheric * alpha;
-            self.learned_data.environmental_factors.atmospheric_pressure_baseline = new_atm_baseline;
-            
-            log::trace!("Atmospheric pressure baseline updated: {:.2} PSI", new_atm_baseline);
+        // Check for timing violations (>10ms for 100Hz loop = timing issue)
+        if cycle_time_us > 10_000 {
+            self.stats.timing_violations += 1;
         }
         
-        // Update confidence metrics
-        self.learned_data.calculate_confidence();
-        
-        Ok(())
+        self.stats.last_update_ms = self.hal.now_ms();
     }
     
-    fn set_solenoid_output(&mut self, duty_cycle: f32) -> Result<(), CoreError> {
-        use rumbledome_hal::{PwmChannel, PwmController};
-        
-        // Clamp duty cycle to safe range
-        let safe_duty = duty_cycle.clamp(0.0, 100.0);
-        
-        // Set PWM output
-        self.hal.set_duty_cycle(PwmChannel::BoostSolenoid, safe_duty)
-            .map_err(|e| CoreError::hardware(e))?;
-        
-        log::trace!("Solenoid output: {:.1}% duty cycle", safe_duty);
-        
-        Ok(())
+    /// Get current system status for diagnostics
+    pub fn get_system_status(&self) -> SystemStatus {
+        SystemStatus {
+            state: self.state.clone(),
+            config: self.config.clone(),
+            stats: self.stats.clone(),
+            uptime_ms: self.hal.now_ms(),
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rumbledome_hal::mock::MockHal;
-    use rumbledome_hal::{SystemInputs, SensorReadings, CanData};
-    
-    fn setup_test_core() -> RumbleDomeCore<MockHal> {
-        let hal = MockHal::new();
-        let config = SystemConfig::default();
-        let mut core = RumbleDomeCore::new(hal, config).unwrap();
-        core.initialize().unwrap();
-        core
-    }
-    
-    fn create_test_inputs(manifold_psi: f32, rpm: u16, desired_torque: f32, actual_torque: f32) -> SystemInputs {
-        SystemInputs {
-            sensors: SensorReadings {
-                dome_input_pressure: 15.0,
-                upper_dome_pressure: 8.0,
-                manifold_pressure_gauge: manifold_psi,
-                timestamp_ms: 1000,
-            },
-            can: CanData {
-                rpm,
-                map_kpa: 101.3,
-                desired_torque,
-                actual_torque,
-                throttle_position: Some(50.0),
-                drive_mode: None,
-                timestamp_ms: 1000,
-            },
-            timestamp_ms: 1000,
-        }
-    }
-    
-    /// SY-001: Overboost Detection and Response
-    #[test]
-    fn test_overboost_immediate_response() {
-        let mut core = setup_test_core();
-        
-        // Set system to armed state
-        core.state = SystemState::Armed;
-        
-        // Create inputs with overboost condition (10.0 PSI > 9.5 PSI limit)
-        let inputs = create_test_inputs(10.0, 4000, 200.0, 190.0);
-        
-        core.execute_control_cycle().unwrap();
-        
-        // System should immediately cut boost
-        assert_eq!(core.get_state(), &SystemState::OverboostCut);
-    }
-    
-    #[test]
-    fn test_overboost_hysteresis() {
-        let mut core = setup_test_core();
-        core.state = SystemState::Armed;
-        
-        // Set a known overboost limit (9.5 PSI) and hysteresis (0.3 PSI)
-        core.config.profiles[0].overboost_limit = 9.5;
-        core.config.profiles[0].overboost_hysteresis = 0.3;
-        
-        // Trigger overboost
-        let inputs_overboost = create_test_inputs(9.6, 4000, 200.0, 190.0);
-        core.execute_control_cycle().unwrap();
-        assert_eq!(core.get_state(), &SystemState::OverboostCut);
-        
-        // Drop below limit but above hysteresis threshold (9.3 > 9.2)
-        core.state = SystemState::OverboostCut; // Ensure we're in cut state
-        let inputs_above_hysteresis = create_test_inputs(9.3, 4000, 200.0, 190.0);
-        core.execute_control_cycle().unwrap();
-        assert_eq!(core.get_state(), &SystemState::OverboostCut); // Still cut
-        
-        // Drop below hysteresis threshold (9.1 < 9.2)
-        let inputs_below_hysteresis = create_test_inputs(9.1, 4000, 200.0, 190.0);
-        core.execute_control_cycle().unwrap();
-        assert_eq!(core.get_state(), &SystemState::Armed); // Resume
-    }
-    
-    /// SY-002: Fault Response Testing
-    #[test]
-    fn test_sensor_fault_detection() {
-        let mut core = setup_test_core();
-        core.state = SystemState::Armed;
-        
-        // Inject implausible sensor reading (negative pressure impossible)
-        let invalid_inputs = create_test_inputs(-5.0, 4000, 200.0, 190.0);
-        
-        // Control cycle should fail with input validation error
-        let result = core.execute_control_cycle();
-        assert!(result.is_err());
-        
-        if let Err(CoreError::InputValidation { .. }) = result {
-            // Expected error type
-        } else {
-            panic!("Expected InputValidation error");
-        }
-    }
-    
-    #[test]
-    fn test_can_timeout_detection() {
-        let mut core = setup_test_core();
-        core.state = SystemState::Armed;
-        
-        // Create inputs with stale CAN data (1000ms + 600ms = 1600ms old, > 500ms timeout)
-        let mut inputs = create_test_inputs(5.0, 4000, 200.0, 190.0);
-        inputs.can.timestamp_ms = 400; // 600ms old when system time is 1000ms
-        inputs.timestamp_ms = 1000;
-        
-        // Should fail with CAN timeout
-        let result = core.execute_control_cycle();
-        assert!(result.is_err());
-        
-        if let Err(CoreError::InputValidation { message }) = result {
-            assert!(message.contains("CAN data timeout"));
-        } else {
-            panic!("Expected CAN timeout validation error");
-        }
-    }
-    
-    /// EC-001: Torque Ceiling Enforcement Testing  
-    #[test]
-    fn test_arming_conditions() {
-        let mut core = setup_test_core();
-        assert_eq!(core.get_state(), &SystemState::Idle);
-        
-        // Test insufficient RPM
-        let low_rpm_inputs = create_test_inputs(2.0, 500, 100.0, 95.0);
-        core.execute_control_cycle().unwrap();
-        assert_eq!(core.get_state(), &SystemState::Idle); // Should not arm
-        
-        // Test valid arming conditions
-        let valid_inputs = create_test_inputs(2.0, 2000, 150.0, 140.0);
-        core.execute_control_cycle().unwrap();
-        assert_eq!(core.get_state(), &SystemState::Armed); // Should arm
-    }
-    
-    #[test]
-    fn test_input_validation_ranges() {
-        let core = setup_test_core();
-        
-        // Test valid inputs
-        let valid_inputs = create_test_inputs(5.0, 3000, 200.0, 190.0);
-        assert!(core.validate_inputs(&valid_inputs).is_ok());
-        
-        // Test high manifold pressure (beyond reasonable boost)
-        let high_pressure_inputs = create_test_inputs(25.0, 3000, 200.0, 190.0);
-        assert!(core.validate_inputs(&high_pressure_inputs).is_err());
-        
-        // Test excessive RPM
-        let mut high_rpm_inputs = create_test_inputs(5.0, 8500, 200.0, 190.0);
-        high_rpm_inputs.can.rpm = 8500;
-        assert!(core.validate_inputs(&high_rpm_inputs).is_err());
-    }
-    
-    #[test]
-    fn test_safety_failsafe_states() {
-        let mut core = setup_test_core();
-        
-        // Test that all non-Armed states result in 0% duty cycle
-        let inputs = create_test_inputs(5.0, 3000, 200.0, 190.0);
-        
-        // Test Idle state
-        core.state = SystemState::Idle;
-        core.execute_control_cycle().unwrap();
-        // Would verify duty cycle is 0% (requires mock HAL verification)
-        
-        // Test Fault state  
-        core.state = SystemState::Fault(FaultCode::WatchdogTimeout);
-        core.execute_control_cycle().unwrap();
-        // Would verify duty cycle is 0%
-        
-        // Test OverboostCut state
-        core.state = SystemState::OverboostCut;
-        core.execute_control_cycle().unwrap();
-        // Would verify duty cycle is 0%
-    }
+/// System status for diagnostics and monitoring
+/// 
+/// 🔗 T4-CORE-009: System Status Reporting
+/// Derived From: Diagnostic and monitoring requirements
+#[derive(Debug, Clone)]
+pub struct SystemStatus {
+    pub state: SystemState,
+    pub config: SystemConfig,
+    pub stats: ControlLoopStats,
+    pub uptime_ms: u32,
 }

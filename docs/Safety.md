@@ -1,25 +1,71 @@
 # RumbleDome Safety Requirements
 
-## Critical Safety Principles
+📖 **For terminology**: See **[Definitions.md](Definitions.md)** for safety-related concepts and technical terms
 
-### Defense in Depth Strategy
+## 🏗️ Tier 1: Foundational Safety Philosophy
+
+### Critical Safety Principles
+
+**🔗 T1-SAFETY-002**: **Defense in Depth Strategy**  
+**Decision Type**: 🎯 **Core Safety Architecture**  
+**Creative Rationale**: Multiple independent safety layers prevent single-point-of-failure catastrophic engine damage  
+**AI Traceability**: Drives all safety implementations (SY-1 through SY-24), redundant monitoring systems
+
 RumbleDome employs multiple independent safety layers to prevent engine damage under all failure scenarios:
 
 1. **Electronic Safety**: Software-based monitoring and response
 2. **Pneumatic Safety**: Physical system design ensures safe failure modes
 3. **Mechanical Safety**: Spring-loaded wastegate provides final backup
 
-### Fail-Safe Design Philosophy
+**🔗 T1-SAFETY-003**: **Fail-Safe Design Philosophy**  
+**Decision Type**: 🎯 **Fundamental Safety Principle**  
+**Creative Rationale**: Any failure mode must bias toward naturally aspirated operation, never toward higher boost  
+**AI Traceability**: Drives all fault handling logic, failure mode analysis, system recovery procedures
+
 **Primary Principle**: Any system failure must result in the safest possible state - minimal boost operation.
+
+## Control Philosophy Safety Integration  
+
+### **Safety-Integrated Control Hierarchy**
+RumbleDome's safety approach directly implements the established control philosophy:
+
+**Priority 1: "Don't Kill My Car"** - Overboost prevention with maximum authority (always overrides)
+**Priority 2 & 3: Performance ⚖️ Comfort Balance** - Aggression determines which leads:
+- **High Aggression**: Performance leads (forceful max boost targeting)
+- **Low Aggression**: Comfort leads (smooth gentle operation) 
+- **Brief spikes above max boost acceptable** - sustained elevation triggers learning
+
+### **Overboost vs Max Boost Distinction**
+- **Overboost (`overboost_limit`)**: Fault condition requiring immediate hard correction (duty=0%) and learning updates
+- **Max Boost Spikes (`max_boost_psi`)**: Brief transient spikes above this safety ceiling are acceptable during normal operation
+- **Tolerance Policy**: System focuses authority on preventing overboost faults, not perfect max boost adherence
+
+---
+
+## 🏗️ Tier 2: Derived Safety Requirements
+
+**All SY-* specifications below are 🔗 Direct Derivations from Tier 1 safety philosophy above**
 
 ## Non-Negotiable Safety Invariants
 
 ### SY-1: Pneumatic Fail-Safe Operation
+
+**🔗 T2-SAFETY-001**: **Zero-Duty Fail-Safe**  
+**Derived From**: T1-SAFETY-003 (Fail-Safe Design Philosophy)  
+**Decision Type**: 🔗 **Direct Derivation** - Physical implementation of fail-safe principle  
+**AI Traceability**: Drives pneumatic system design, solenoid control algorithms, fault detection logic
+
 - **Requirement**: `duty = 0%` forces full input pressure to lower dome → wastegate forced open → minimal boost
 - **Rationale**: Physical system design ensures that total electronic failure results in safe operation
 - **Validation**: System behavior must be verified through pneumatic testing with solenoid power removed
 
 ### SY-2: High-Authority System Recognition
+
+**🔗 T2-SAFETY-002**: **High-Authority Recognition**  
+**Derived From**: T1-SAFETY-002 (Defense in Depth Strategy)  
+**Decision Type**: 🔗 **Direct Derivation** - Conservative control strategy from defense principle  
+**AI Traceability**: Drives control algorithm sensitivity limits, duty cycle rate limiting, gain scheduling
+
 - **Requirement**: System recognizes that small duty cycle changes can produce large boost changes, requiring more conservative control strategies
 - **Rationale**: High-pressure pneumatic system can achieve dangerous boost levels with relatively low duty cycles (15-20%)
 - **Implementation**: All control algorithms must account for high system sensitivity
@@ -126,7 +172,7 @@ RumbleDome employs multiple independent safety layers to prevent engine damage u
 
 ### SY-20: Operational State Safety
 - **Power-On Safety**: System starts in safe state, requires explicit activation
-- **Profile Switching**: Live profile changes validated for safety before activation
+- **Control Knob Changes**: Live control knob changes validated for safety before activation
 - **Calibration Safety**: Calibration mode has additional safety constraints and monitoring
 - **Emergency Shutdown**: Manual emergency shutdown capability always available
 
@@ -148,19 +194,20 @@ RumbleDome employs multiple independent safety layers to prevent engine damage u
 - **User Interface Safety**: Confirmation that all user interface operations maintain safety
 
 ### SY-24: Storage Health & Data Integrity Safety
-- **Storage Failure Prediction**: Proactive monitoring to prevent unexpected EEPROM failures
-- **Health Thresholds**: Automated warnings at 80% wear, critical alerts at 95% wear
-- **Data Corruption Detection**: Checksum validation and corruption recovery procedures  
-- **Automotive Power Loss**: Immediate write-through persistence to handle abrupt power loss
-- **Learning Rate Limiting**: Prevent excessive write cycles that could prematurely wear storage
-- **Safe Degradation**: System must operate safely even with storage health degradation
+- **SD Card Health Monitoring**: Monitor for card errors, corruption, and write failures
+- **Failure Detection**: Detect SD card removal, corruption, or filesystem errors
+- **Data Corruption Detection**: Checksum validation and automatic corruption recovery  
+- **Atomic Writes**: Crash-safe file operations using temporary files and atomic renames
+- **Write Optimization**: Debounced writes and change detection to minimize SD card wear
+- **Safe Degradation**: System must operate safely with default parameters if SD card fails
 
-**Storage Health Safety Requirements**:
-- **SY-24.1**: System monitors EEPROM wear levels continuously during operation
-- **SY-24.2**: User warnings displayed when any storage region exceeds 80% wear limit
-- **SY-24.3**: Critical alerts and lifespan estimates provided at 95% wear limit
-- **SY-24.4**: All storage writes complete immediately (no deferred writes that could be lost)
-- **SY-24.5**: Learning system limits write frequency to preserve storage lifespan
-- **SY-24.6**: System remains safe and functional even with complete storage failure
-- **SY-24.7**: Storage health data accessible via console/GUI for predictive maintenance
-- **SY-24.8**: Comprehensive wear tracking prevents mystery storage failures
+**SD Card Storage Safety Requirements**:
+- **SY-24.1**: System detects SD card presence, corruption, and filesystem errors
+- **SY-24.2**: User warnings displayed for SD card errors or impending failures
+- **SY-24.3**: Automatic fallback to safe default parameters if SD card unavailable
+- **SY-24.4**: All writes use atomic operations (temp file + rename) to prevent corruption
+- **SY-24.5**: Learning system uses debounced writes to minimize SD card wear
+- **SY-24.6**: System remains safe and functional even with complete SD card failure
+- **SY-24.7**: SD card health status accessible via console/GUI for diagnostics
+- **SY-24.8**: Automatic backup system prevents data loss from card failures
+- **SY-24.9**: Write frequency optimization prevents premature SD card wear
