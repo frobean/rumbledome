@@ -11,8 +11,7 @@
 
 **🏗️ TIER 1 SECTION: Foundational Philosophy**
 
-**🔗 T1-PHILOSOPHY-001**: **3-Tier Priority Hierarchy** (Reference: Context.md)  
-**Decision Type**: 🎯 **Core Creative Concept** - Inherited from Context.md  
+**Foundational Philosophy**: T1-PHILOSOPHY-001 (3-Tier Priority Hierarchy) - See [Context.md](Context.md) for complete specification  
 **AI Traceability**: This philosophy drives ALL functional requirements below
 
 RumbleDome implements a **priority hierarchy with aggression-mediated balance** that governs all system behavior:

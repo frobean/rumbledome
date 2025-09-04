@@ -23,9 +23,9 @@
   - **Units**: RPM
   - **Status**: Ready for implementation
 
-**🚧 T2-CAN-002**: **Ford S550 Torque Signal A (0x167)**  
+**🔗 T2-CAN-002**: **Ford S550 Torque Signal A (0x167)**  
 **Status**: 🚧 **TBD - Vehicle Testing Required**  
-**Decision Type**: ⚠️ **Engineering Decision** (when signal type determined)  
+**Decision Type**: ⚠️ **Engineering Decision** - Signal identification pending vehicle testing  
 **Derived From**: T1-TORQUE-001 (ECU Cooperation Philosophy)  
 **Research Required**: Vehicle testing to determine if this represents desired or actual torque  
 **AI Generation Impact**: BLOCKS torque-following control until signal type resolved  
@@ -51,9 +51,9 @@
   - **Status**: Ready for implementation
 
 
-**🚧 T2-CAN-004**: **Ford S550 Torque Signal B (0x43E)**  
+**🔗 T2-CAN-004**: **Ford S550 Torque Signal B (0x43E)**  
 **Status**: 🚧 **TBD - Signal Differentiation Required**  
-**Decision Type**: ⚠️ **Engineering Decision** (when signal role determined)  
+**Decision Type**: ⚠️ **Engineering Decision** - Signal role identification pending testing  
 **Research Required**: Compare 0x167 vs 0x43E behavior to identify desired vs actual torque signals  
 **Engineering Hypothesis**: May represent engine load percentage vs absolute torque  
 **AI Generation Impact**: Affects torque signal selection logic  
@@ -67,7 +67,7 @@
 
 ## 🚧 TBD Research Requirements
 
-**🚧 T2-CAN-005**: **Desired vs Actual Torque Signal Identification**  
+**🔗 T2-CAN-005**: **Desired vs Actual Torque Signal Identification**  
 **Status**: 🚧 **TBD - Signal Differentiation Testing**  
 **Decision Type**: ⚠️ **Engineering Decision**  
 **Research Required**: Vehicle testing to identify which CAN signals represent ECU desired torque vs actual delivered torque  
@@ -78,7 +78,7 @@
   3. Cross-reference with HPTuners torque channels if available
 **Fallback Strategy**: PID-based torque signals if CAN separation not available
 
-**🔬 T2-CAN-006**: **CAN Message Update Frequencies**  
+**🔗 T2-CAN-006**: **CAN Message Update Frequencies**  
 **Status**: 🔬 **RESEARCH - Frequency Analysis Required**  
 **Decision Type**: 🔗 **Direct Derivation** (from control loop requirements)  
 **Derived From**: T2-CONTROL-001 (100Hz control loop - Architecture.md)  
@@ -87,7 +87,7 @@
 **AI Generation Impact**: Affects control loop timing and buffer sizing  
 **Test Method**: CAN sniffer frequency analysis across RPM range
 
-**🔬 T2-CAN-007**: **Signal Scaling and Accuracy Validation**  
+**🔗 T2-CAN-007**: **Signal Scaling and Accuracy Validation**  
 **Status**: 🔬 **RESEARCH - Calibration Validation Required**  
 **Decision Type**: ⚠️ **Engineering Decision**  
 **Research Required**: 

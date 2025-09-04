@@ -1,0 +1,50 @@
+#!/bin/bash
+# RumbleDome Systematic Engineering Pre-Commit Hook
+# 
+# Enforces AI-Traceable Engineering discipline by validating:
+# - No incomplete architect skeletons can be committed
+# - All traceability links must be valid
+# - Systematic engineering health must be maintained
+#
+# 🔗 T4-ENFORCEMENT-001: Pre-commit Systematic Engineering Validation
+# Derived From: AI_Philosophy.md systematic engineering enforcement
+# Prevents vibe-coding commits and maintains engineering discipline
+
+set -e
+
+echo "🔍 RumbleDome Systematic Engineering Validation"
+echo "=" * 50
+
+# Check if CLI tool exists
+if [ ! -f "./tools/cli" ]; then
+    echo "❌ RumbleDome CLI not found at ./tools/cli"
+    echo "💡 Systematic engineering validation requires CLI tool"
+    exit 1
+fi
+
+# Make sure CLI is executable
+chmod +x ./tools/cli
+
+# Run systematic engineering validation
+echo "🔧 Validating systematic engineering compliance..."
+if ./tools/cli validate --pre-commit --blocking; then
+    echo "✅ Systematic engineering validation passed"
+    echo "🚀 Commit approved - engineering discipline maintained!"
+    exit 0
+else
+    echo ""
+    echo "🚫 COMMIT REJECTED - Systematic engineering issues detected"
+    echo ""
+    echo "💡 Fix issues with:"
+    echo "   ./tools/cli fix --git    # Create safe branch for fixes"  
+    echo "   ./tools/cli fix          # Interactive fix assistant"
+    echo "   ./tools/cli validate     # Re-check after fixes"
+    echo ""
+    echo "📋 Or get detailed report:"
+    echo "   ./tools/cli report --export status.md"
+    echo ""
+    echo "🎯 Systematic engineering prevents technical debt and ensures"
+    echo "   every line of code traces back to engineering decisions."
+    echo ""
+    exit 1
+fi

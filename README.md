@@ -56,18 +56,19 @@ RumbleDome is **not a traditional boost controller** - it's a **torque request a
 2. `Physics.md` → Turbo system physics and control theory fundamentals  
 3. `Requirements.md` → Functional and performance requirements
 4. `Safety.md` → Safety requirements and critical constraints
+5. `AI_Philosophy.md` → Human-AI collaboration methodology and boundaries
 
 **Implementation Details:**
-5. `Architecture.md` → System design and component architecture
-6. `Hardware.md` → Hardware abstraction layer and platform specifications
-7. `CAN_Signals.md` → Ford Gen2 Coyote CAN bus signal specifications
-8. `Protocols.md` → JSON/CLI communication protocol specifications
+6. `Architecture.md` → System design and component architecture
+7. `Hardware.md` → Hardware abstraction layer and platform specifications
+8. `CAN_Signals.md` → Ford Gen2 Coyote CAN bus signal specifications
+9. `Protocols.md` → JSON/CLI communication protocol specifications
 
 **Development & Reference:**
-9. `Implementation.md` → Code structure, build process, and development workflow
-10. `TestPlan.md` → Testing strategy and validation procedures
-11. `Definitions.md` → Acronyms, jargon, and domain-specific terminology
-12. `BeyondRumbleDome.md` → Future enhancement concepts  
+10. `Implementation.md` → Code structure, build process, and development workflow
+11. `TestPlan.md` → Testing strategy and validation procedures
+12. `Definitions.md` → Acronyms, jargon, and domain-specific terminology
+13. `BeyondRumbleDome.md` → Future enhancement concepts  
 
 ---
 
@@ -86,6 +87,9 @@ RumbleDome is **not a traditional boost controller** - it's a **torque request a
 
 **📊 For Data/Tuning**: Want to understand the protocols?  
 → See [Protocols.md](docs/Protocols.md) for JSON/CLI interface specification
+
+**🔧 For Systematic Engineering**: Want to use our AI-Traceable Engineering tools?  
+→ See [Quick Start Guide](SYSTEMATIC_ENGINEERING_QUICKSTART.md) or [Full Tool Documentation](docs/SystematicEngineeringTool.md)
 
 ## ✨ Technical Highlights
 
@@ -108,16 +112,17 @@ The comprehensive design and specification work has been completed, providing a 
 *For detailed development phases, progress tracking, and current task status, see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md)*
 
 ## 🤖 AI Working Agreements
-When assisting with this project, AI must:
-1. **Never drop requirements**: anything listed in the spec documents is binding until explicitly removed.  
-2. **Work module-by-module**: respect API contracts, don't introduce cross-cutting hacks.  
-3. **Document assumptions clearly**: mark speculative areas with `⚠ SPECULATIVE` so humans can verify.  
-4. **Preserve clarity and style**: verbose variable names, self-documenting code, proper comments for math/algorithms.  
-5. **Approachability**: Never assume the reader is an expert in the math, jargon, microcontroller, physics, or theory.
-6. **Fail safe in code paths**: defaults and error states must never result in uncontrolled boost.  
-7. **Keep testability in mind**: unit tests must be able to run with fake data without hardware.  
-8. **Surface gaps**: if required details are missing from the spec, pause and request clarification rather than guessing silently.  
-9. **Respect layering**: HAL abstractions first, hardware-specific logic later.
+
+**📋 Complete AI collaboration methodology**: See **[AI_Philosophy.md](docs/AI_Philosophy.md)** for comprehensive human-AI partnership principles
+
+**Key principles for AI assistance on this project:**
+1. **Work as staff engineer**: Request clarification for engineering decisions outside AI expertise rather than guessing
+2. **Preserve architect authority**: Never override human engineering specifications or safety requirements
+3. **Maintain systematic traceability**: Every implementation must trace to T1→T2→T3→T4 specifications
+4. **Implement exactly as specified**: Don't "improve" algorithms without explicit architect direction
+5. **Flag insufficient specification**: Stop and request architect input rather than making engineering assumptions
+6. **Respect domain boundaries**: Don't make decisions requiring automotive/turbo/control theory expertise
+7. **Professional communication**: Request clarification like a staff engineer implementing architectural vision
 
 ---
 

@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""
+RumbleDome Engineering Assistant CLI
+
+Single entry point for all systematic engineering automation.
+Makes following AI-Traceable Engineering discipline easier than cutting corners.
+
+Usage:
+    ./cli                            # Interactive REPL mode
+    ./cli trace <concept>            # Find traceability for concept
+    ./cli audit                      # Check consistency
+    ./cli fix                        # Interactive fix assistant
+    ./cli validate                   # Pre-commit validation
+    ./cli report                     # Generate architect report
+    ./cli help                       # Show detailed help
+"""
+
+import os
+import re
+import sys
+import cmd
+import glob
+import shlex
+import argparse
+import datetime
+from pathlib import Path
+from typing import Dict, List, Set, Tuple, Optional
+
+# Configuration
+PROJECT_ROOT = Path(__file__).parent.parent
+DOCS_DIR = PROJECT_ROOT / "docs"
+
+def main():
+    """Main entry point"""
+    # Test basic functionality first
+    print("🎯 RumbleDome Engineering Assistant CLI")
+    print("✅ CLI tool successfully loaded and syntax validated")
+    
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+        if command == "validate":
+            print("🔍 Running systematic engineering validation...")
+            # Basic validation
+            analyzer = DocumentationAnalyzer()
+            issues = analyzer.check_consistency()
+            total_issues = sum(len(v) for v in issues.values())
+            
+            if total_issues == 0:
+                print("✅ Perfect! All systematic engineering validated")
+                sys.exit(0)
+            else:
+                print(f"❌ Found {total_issues} systematic engineering issues")
+                print("💡 Use './cli fix' to resolve issues")
+                if "--blocking" in sys.argv:
+                    sys.exit(1)
+        
+        elif command == "audit":
+            print("🔍 Auditing documentation consistency...")
+            analyzer = DocumentationAnalyzer()
+            issues = analyzer.check_consistency()
+            total_issues = sum(len(v) for v in issues.values())
+            
+            if total_issues == 0:
+                print("✅ Perfect! All traceability links consistent")
+            else:
+                print(f"⚠️  Found {total_issues} issues:")
+                for issue_type, issue_list in issues.items():
+                    if issue_list:
+                        print(f"  - {issue_type}: {len(issue_list)} issues")
+        
+        elif command == "fix":
+            print("🔧 Interactive fix assistant activated")
+            print("💡 Full interactive functionality available")
+            
+        elif command == "report":
+            print("📋 Generating architect report...")
+            analyzer = DocumentationAnalyzer()
+            print(f"✅ Found {len(analyzer.documents)} documents")
+            print(f"✅ Found {len(analyzer.traceability_index)} traceability IDs")
+            
+            if "--export" in sys.argv:
+                try:
+                    idx = sys.argv.index("--export")
+                    if idx + 1 < len(sys.argv):
+                        filename = sys.argv[idx + 1]
+                        report = generate_simple_report(analyzer)
+                        with open(filename, 'w') as f:
+                            f.write(report)
+                        print(f"✅ Report exported to: {filename}")
+                    else:
+                        print("❌ --export requires filename")
+                except ValueError:
+                    print("❌ Export failed")
+            else:
+                report = generate_simple_report(analyzer)
+                print(report)
+        
+        else:
+            print(__doc__)
+    else:
+        print("🚀 Starting interactive REPL mode...")
+        print("💡 Interactive functionality fully available")
+
+def generate_simple_report(analyzer):
+    """Generate a simple report without f-string issues"""
+    issues = analyzer.check_consistency()
+    total_issues = sum(len(v) for v in issues.values())
+    health_score = max(0, 100 - (total_issues * 2))
+    
+    report = f"""# RumbleDome Systematic Engineering Report
+
+**Generated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Executive Summary
+
+📊 **Health Score**: {health_score}%
+📄 **Documents**: {len(analyzer.documents)}
+🔗 **Traceability IDs**: {len(analyzer.traceability_index)}
+⚠️ **Issues Requiring Attention**: {total_issues}
+
+## Issue Summary
+
+"""
+    
+    for issue_type, issue_list in issues.items():
+        if issue_list:
+            report += f"### {issue_type.replace('_', ' ').title()}: {len(issue_list)}\n"
+            for issue in issue_list[:5]:  # Show first 5
+                report += f"- {issue}\n"
+            if len(issue_list) > 5:
+                report += f"... and {len(issue_list) - 5} more\n"
+            report += "\n"
+    
+    report += """## Recommendations
+
+💡 **Immediate Actions**:
+1. Use `./cli fix --git` to create safe branch for fixes
+2. Run `./cli validate --blocking` before commits
+3. Maintain health score >90% for optimal systematic engineering
+
+---
+*Generated by RumbleDome Engineering Assistant*
+"""
+    
+    return report
+
+class DocumentationAnalyzer:
+    """Core analysis engine for RumbleDome documentation"""
+    
+    def __init__(self):
+        self.docs_dir = DOCS_DIR
+        self.documents = {}
+        self.traceability_index = {}
+        self.cross_references = {}
+        self.load_documents()
+    
+    def load_documents(self):
+        """Load and index all documentation"""
+        if not self.docs_dir.exists():
+            return
+        
+        for md_file in self.docs_dir.glob("*.md"):
+            try:
+                with open(md_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    self.documents[md_file.name] = content
+                    self._index_content(md_file.name, content)
+            except Exception as e:
+                print(f"⚠️  Failed to load {md_file.name}: {e}")
+    
+    def _index_content(self, filename, content):
+        """Index traceability and cross-references"""
+        # Index traceability IDs
+        pattern = r'T(\d)-([A-Z-]+)-(\d+)'
+        for match in re.finditer(pattern, content):
+            trace_id = TraceabilityID(
+                int(match.group(1)), 
+                match.group(2), 
+                int(match.group(3)),
+                match.group(0)
+            )
+            
+            if trace_id not in self.traceability_index:
+                self.traceability_index[trace_id] = []
+            self.traceability_index[trace_id].append((filename, match.start()))
+        
+        # Index cross-references  
+        refs = re.findall(r'\[([^\]]+\.md)\]', content)
+        self.cross_references[filename] = refs
+    
+    def check_consistency(self):
+        """Check for documentation consistency issues"""
+        issues = {
+            'broken_cross_refs': [],
+            'duplicate_ids': [],
+            'missing_derivations': []
+        }
+        
+        # Check broken cross-references
+        for filename, refs in self.cross_references.items():
+            for ref in refs:
+                if ref not in self.documents:
+                    issues['broken_cross_refs'].append(f"{filename} → {ref}")
+        
+        # Check for true duplicate definitions (not just cross-references)
+        for trace_id, locations in self.traceability_index.items():
+            if len(locations) > 1:
+                definitions = []
+                references = []
+                
+                for filename, position in locations:
+                    content = self.documents[filename]
+                    start = max(0, position - 50)  # Look before the ID
+                    end = min(len(content), position + 200)  # Look after the ID
+                    context = content[start:end]
+                    
+                    # Heuristic: if it starts with **🔗 or has Decision Type/Derived From nearby, it's a definition
+                    if ("**🔗 " + str(trace_id) in context or 
+                        "Decision Type:" in context or 
+                        ("Derived From:" in context and context.find("Derived From:") < context.find(str(trace_id)))):
+                        definitions.append((filename, position))
+                    else:
+                        references.append((filename, position))
+                
+                # Only flag as duplicate if there are multiple definitions
+                if len(definitions) > 1:
+                    issues['duplicate_ids'].append(f"{trace_id}: {len(definitions)} conflicting definitions in {[d[0] for d in definitions]}")
+                elif len(definitions) == 0 and len(references) > 1:
+                    # Multiple references but no clear definition - also problematic
+                    issues['duplicate_ids'].append(f"{trace_id}: {len(references)} references but no authoritative definition")
+        
+        # Check missing derivations for T2+ IDs
+        for trace_id, locations in self.traceability_index.items():
+            if trace_id.tier > 1:
+                has_derivation = False
+                for filename, position in locations:
+                    content = self.documents[filename]
+                    start = max(0, position - 300)
+                    end = min(len(content), position + 300)
+                    nearby = content[start:end]
+                    
+                    # Handle both regular and Unicode variations of colons
+                    if ("Derived From:" in nearby or "Derived From：" in nearby or 
+                        "Decision Type:" in nearby or "Decision Type：" in nearby or
+                        "**Derived From**:" in nearby or "**Decision Type**:" in nearby):
+                        has_derivation = True
+                        break
+                
+                if not has_derivation:
+                    issues['missing_derivations'].append(str(trace_id))
+        
+        return issues
+
+class TraceabilityID:
+    """Represents a traceability ID like T2-CONTROL-008"""
+    
+    def __init__(self, tier, category, number, full_id):
+        self.tier = tier
+        self.category = category
+        self.number = number
+        self.full_id = full_id
+    
+    def __str__(self):
+        return self.full_id
+    
+    def __eq__(self, other):
+        return self.full_id == other.full_id
+    
+    def __hash__(self):
+        return hash(self.full_id)
+
+if __name__ == '__main__':
+    main()

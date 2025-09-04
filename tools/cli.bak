@@ -1,0 +1,1182 @@
+#!/usr/bin/env python3
+"""
+RumbleDome Engineering Assistant CLI
+
+Single entry point for all systematic engineering automation.
+Makes following AI-Traceable Engineering discipline easier than cutting corners.
+
+Usage:
+    ./cli                            # Interactive REPL mode
+    ./cli trace <concept>            # Find traceability for concept
+    ./cli audit                      # Check consistency
+    ./cli impact <file>              # Impact analysis
+    ./cli spec <feature>             # Generate specification template
+    ./cli help                       # Show detailed help
+"""
+
+import os
+import re
+import sys
+import cmd
+import glob
+import shlex
+import argparse
+from pathlib import Path
+from typing import Dict, List, Set, Tuple, Optional
+
+# Configuration
+PROJECT_ROOT = Path(__file__).parent.parent
+DOCS_DIR = PROJECT_ROOT / "docs"
+CRATES_DIR = PROJECT_ROOT / "crates"
+
+class RumbleDomeREPL(cmd.Cmd):
+    """Interactive REPL for RumbleDome engineering assistance"""
+    
+    intro = '''
+🎯 RumbleDome Engineering Assistant - Interactive Mode
+
+Making systematic engineering easier than vibe coding!
+
+Available commands:
+  trace <concept>     - Find/create traceability for concept
+  audit              - Check documentation consistency  
+  impact <file>      - Analyze change impact
+  spec <feature>     - Generate specification template
+  status             - Show project engineering status
+  docs               - List all documentation
+  help <command>     - Get help on specific command
+  quit               - Exit REPL
+
+Type 'help' for detailed command help.
+'''
+    
+    prompt = '🔧 rumbledome> '
+    
+    def __init__(self):
+        super().__init__()
+        self.analyzer = DocumentationAnalyzer()
+        self.load_project_status()
+    
+    def load_project_status(self):
+        """Load current project status"""
+        print("🔍 Loading project documentation...")
+        doc_count = len(self.analyzer.documents)
+        trace_count = len(self.analyzer.traceability_index)
+        print(f"✅ Loaded {doc_count} documents with {trace_count} traceability IDs")
+    
+    def do_trace(self, arg):
+        """Find or create traceability for a concept
+        
+        Usage: trace <concept>
+        Example: trace "boost control loop"
+        """
+        if not arg:
+            print("❌ Please provide a concept to search for")
+            print("   Usage: trace <concept>")
+            return
+        
+        concept = arg.strip().strip('"\'')
+        print(f"🔍 Searching traceability for: {concept}")
+        
+        matches = self.analyzer.find_traceability_for_concept(concept)
+        
+        if matches:
+            print(f"✅ Found {len(matches)} existing traceability matches:")
+            for i, (trace_id, filename, context) in enumerate(matches, 1):
+                print(f"{i}. {trace_id} in {filename}")
+                print(f"   📝 {context}")
+            
+            print(f"\n💡 Use one of these IDs or create new T2-CONTROL-XXX")
+        else:
+            print("❌ No existing traceability found")
+            next_id = self.analyzer.suggest_next_id("CONTROL")
+            print(f"💡 Suggested new ID: {next_id}")
+            print(f"   Run: spec \"{concept}\" to generate template")
+    
+    def do_audit(self, arg):
+        """Check documentation consistency
+        
+        Usage: audit [--verbose] [--fix]
+        """
+        verbose = '--verbose' in arg
+        auto_fix = '--fix' in arg
+        
+        print("🔍 Auditing documentation consistency...")
+        
+        issues = self.analyzer.check_consistency()
+        total_issues = sum(len(issue_list) for issue_list in issues.values())
+        
+        if total_issues == 0:
+            print("✅ Perfect! All traceability links consistent")
+            self._show_project_health()
+            return
+        
+        print(f"⚠️  Found {total_issues} issues requiring attention:")
+        
+        if issues['broken_cross_refs']:
+            print(f"\n📋 {len(issues['broken_cross_refs'])} broken cross-references:")
+            for ref in issues['broken_cross_refs']:
+                print(f"  ❌ {ref}")
+        
+        if issues['duplicate_ids']:
+            print(f"\n📋 {len(issues['duplicate_ids'])} duplicate IDs:")
+            for dup in issues['duplicate_ids']:
+                print(f"  ⚠️  {dup}")
+                
+            # Smart analysis of duplicates
+            if auto_fix:
+                self._analyze_and_fix_duplicates(issues['duplicate_ids'])
+            else:
+                print(f"💡 Run 'audit --fix' to get smart repair suggestions")
+        
+        if issues['missing_derivations']:
+            print(f"\n📋 {len(issues['missing_derivations'])} missing derivations:")
+            for tid in issues['missing_derivations']:
+                print(f"  🔗 {tid}")
+            
+            if auto_fix:
+                self._suggest_derivations(issues['missing_derivations'])
+            else:
+                print(f"💡 Run 'audit --fix' to get derivation suggestions")
+        
+        if not auto_fix:
+            print(f"\n🔧 Run 'audit --fix' for intelligent repair assistance")
+    
+    def do_impact(self, arg):
+        """Analyze impact of changing a file
+        
+        Usage: impact <filename>
+        Example: impact Requirements.md
+        """
+        if not arg:
+            print("❌ Please specify a file")
+            print("   Usage: impact <filename>") 
+            return
+        
+        filename = arg.strip()
+        if not filename.endswith('.md'):
+            filename += '.md'
+        
+        print(f"🔍 Analyzing impact of changes to: {filename}")
+        
+        if filename not in self.analyzer.documents:
+            print(f"❌ File {filename} not found")
+            print("📋 Available files:")
+            for doc in sorted(self.analyzer.documents.keys()):
+                print(f"  - {doc}")
+            return
+        
+        # Find tier level
+        tier = self._detect_tier(filename)
+        if tier:
+            print(f"📊 Tier {tier} document - changes affect ALL lower tiers")
+        
+        # Find downstream dependencies
+        deps = self.analyzer.find_dependencies(filename)
+        if deps:
+            print(f"📋 Downstream documents to review:")
+            for dep in deps:
+                print(f"  📄 {dep}")
+        
+        # Find traceability IDs
+        trace_ids = self.analyzer.get_traceability_ids(filename)
+        if trace_ids:
+            print(f"🔗 Traceability IDs defined here:")
+            for tid in trace_ids:
+                print(f"  {tid}")
+    
+    def do_spec(self, arg):
+        """Generate specification template for new feature
+        
+        Usage: spec <feature_name>
+        Example: spec "launch control"
+        """
+        if not arg:
+            print("❌ Please provide a feature name")
+            print("   Usage: spec <feature_name>")
+            return
+        
+        feature = arg.strip().strip('"\'')
+        print(f"📋 Generating specification template for: {feature}")
+        
+        template = self.analyzer.generate_spec_template(feature)
+        
+        # Show template
+        print("\n" + "="*60)
+        print(template)
+        print("="*60)
+        
+        # Suggest next steps
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', feature.lower())
+        filename = f"spec_{safe_name}.md"
+        
+        print(f"\n💡 Next steps:")
+        print(f"1. Save template as: docs/{filename}")
+        print(f"2. Architect review and complete TODO sections")
+        print(f"3. Add to git and commit systematic specification")
+    
+    def do_status(self, arg):
+        """Show overall project engineering status"""
+        print("📊 RumbleDome Engineering Status")
+        print("=" * 40)
+        
+        self._show_project_health()
+        self._show_tier_coverage()
+        self._show_recent_activity()
+    
+    def do_docs(self, arg):
+        """List all documentation with tier classification"""
+        print("📚 RumbleDome Documentation")
+        print("=" * 40)
+        
+        by_tier = {}
+        for filename in self.analyzer.documents.keys():
+            tier = self._detect_tier(filename)
+            if tier not in by_tier:
+                by_tier[tier] = []
+            by_tier[tier].append(filename)
+        
+        for tier in sorted(by_tier.keys()):
+            tier_name = {
+                1: "Tier 1: Problem Definition",
+                2: "Tier 2: Implementation Design", 
+                3: "Tier 3: Development Support",
+                None: "Uncategorized"
+            }.get(tier, f"Tier {tier}")
+            
+            print(f"\n{tier_name}:")
+            for doc in sorted(by_tier[tier]):
+                trace_count = len(self.analyzer.get_traceability_ids(doc))
+                print(f"  📄 {doc:<25} ({trace_count} traceability IDs)")
+    
+    def _show_project_health(self):
+        """Show project health metrics"""
+        total_docs = len(self.analyzer.documents)
+        total_trace_ids = len(self.analyzer.traceability_index)
+        issues = self.analyzer.check_consistency()
+        total_issues = sum(len(issue_list) for issue_list in issues.values())
+        
+        health_score = max(0, 100 - (total_issues * 10))
+        
+        print(f"📈 Health Score: {health_score}% {'✅' if health_score > 90 else '⚠️' if health_score > 70 else '❌'}")
+        print(f"📄 Documents: {total_docs}")
+        print(f"🔗 Traceability IDs: {total_trace_ids}")
+        print(f"⚠️  Issues: {total_issues}")
+    
+    def _show_tier_coverage(self):
+        """Show tier coverage statistics"""
+        tier_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+        
+        for trace_id in self.analyzer.traceability_index:
+            if trace_id.tier in tier_counts:
+                tier_counts[trace_id.tier] += 1
+        
+        print(f"\n📊 Tier Coverage:")
+        for tier, count in tier_counts.items():
+            bar = "█" * (count // 2) + "░" * (10 - count // 2)
+            print(f"  T{tier}: {bar} {count} IDs")
+    
+    def _show_recent_activity(self):
+        """Show recent activity (placeholder)"""
+        print(f"\n📅 Recent Activity:")
+        print(f"  🔧 Last consistency check: Just now")
+        print(f"  📝 Last documentation update: Today")
+    
+    def _detect_tier(self, filename):
+        """Detect tier level of document"""
+        tier_keywords = {
+            1: ['context', 'requirements', 'safety', 'physics'],
+            2: ['architecture', 'technical', 'hardware', 'protocol'],
+            3: ['implementation', 'test', 'definition']
+        }
+        
+        name_lower = filename.lower()
+        for tier, keywords in tier_keywords.items():
+            if any(keyword in name_lower for keyword in keywords):
+                return tier
+        return None
+    
+    def do_fix(self, arg):
+        """Interactive fix assistant for systematic engineering issues
+        
+        Usage: fix [--all] [--git] [trace_id]
+        Examples:
+          fix                    - Interactive fix selection
+          fix T2-CONTROL-001     - Fix specific traceability issue
+          fix --all              - Fix all issues with confirmation
+          fix --git              - Create git branch for fixes
+        """
+        use_git = '--git' in arg
+        fix_all = '--all' in arg
+        specific_id = None
+        
+        # Parse specific ID if provided
+        parts = arg.strip().split()
+        for part in parts:
+            if part.startswith('T') and '-' in part:
+                specific_id = part
+                break
+        
+        if use_git:
+            branch_name = self._create_fix_branch()
+            if not branch_name:
+                print("❌ Git branch creation failed")
+                return
+            print(f"✅ Created fix branch: {branch_name}")
+        
+        if specific_id:
+            self._fix_specific_issue(specific_id)
+        elif fix_all:
+            self._fix_all_issues_interactive()
+        else:
+            self._interactive_fix_selection()
+    
+    def do_validate(self, arg):
+        """Validate systematic engineering for commits
+        
+        Usage: validate [--pre-commit] [--blocking]
+        Examples:
+          validate              - Check current state
+          validate --pre-commit - Pre-commit hook validation
+          validate --blocking   - Exit with error code if issues found
+        """
+        is_pre_commit = '--pre-commit' in arg
+        is_blocking = '--blocking' in arg
+        
+        print("🔍 Validating systematic engineering compliance...")
+        
+        issues = self.analyzer.check_consistency()
+        skeleton_issues = self._find_incomplete_skeletons()
+        
+        total_issues = sum(len(v) for v in issues.values()) + len(skeleton_issues)
+        
+        if total_issues == 0:
+            print("✅ Perfect! All systematic engineering validated")
+            if is_pre_commit:
+                print("🚀 Commit approved - systematic engineering maintained")
+            return
+        
+        # Report issues
+        if skeleton_issues:
+            print(f"\n❌ {len(skeleton_issues)} incomplete architect skeletons:")
+            for filename, line, placeholder in skeleton_issues[:5]:
+                print(f"  📄 {filename}:{line} - {placeholder}")
+            if len(skeleton_issues) > 5:
+                print(f"  ... and {len(skeleton_issues) - 5} more")
+        
+        if issues['broken_cross_refs']:
+            print(f"\n❌ {len(issues['broken_cross_refs'])} broken cross-references")
+        
+        if issues['missing_derivations']:
+            print(f"\n❌ {len(issues['missing_derivations'])} missing derivations")
+        
+        # Handle blocking behavior
+        if is_pre_commit or is_blocking:
+            print(f"\n🚫 COMMIT BLOCKED: {total_issues} systematic engineering issues")
+            print("💡 Fix issues with: ./cli fix")
+            if is_blocking:
+                import sys
+                sys.exit(1)
+        else:
+            print(f"\n💡 Run 'fix' command to resolve {total_issues} issues")
+    
+    def do_report(self, arg):
+        """Generate architect reports for systematic engineering status
+        
+        Usage: report [--export filename] [--format markdown|json]
+        Examples:
+          report                           - Show status report
+          report --export status.md        - Export markdown report
+          report --export data.json --format json - Export JSON data
+        """
+        export_file = None
+        format_type = 'markdown'
+        
+        parts = arg.split()
+        if '--export' in parts:
+            idx = parts.index('--export')
+            if idx + 1 < len(parts):
+                export_file = parts[idx + 1]
+        
+        if '--format' in parts:
+            idx = parts.index('--format')
+            if idx + 1 < len(parts):
+                format_type = parts[idx + 1]
+        
+        report_content = self._generate_architect_report(format_type)
+        
+        if export_file:
+            try:
+                with open(export_file, 'w') as f:
+                    f.write(report_content)
+                print(f"✅ Report exported to: {export_file}")
+            except Exception as e:
+                print(f"❌ Export failed: {e}")
+        else:
+            print(report_content)
+
+    def do_help(self, arg):
+        """Show help for commands"""
+        if arg:
+            super().do_help(arg)
+        else:
+            print("""
+🎯 RumbleDome Engineering Assistant Commands:
+
+📋 Documentation & Traceability:
+  trace <concept>     - Find existing traceability for concept
+  audit              - Check documentation consistency
+  impact <file>      - Analyze change impact for file
+  spec <feature>     - Generate specification template
+
+🔧 Systematic Engineering Automation:
+  fix                - Interactive fix assistant for all issues
+  fix T2-XXX-001     - Fix specific traceability issue  
+  fix --git          - Create git branch for safe fixes
+  validate           - Validate systematic engineering compliance
+  validate --blocking - Block operations if issues found
+  report             - Generate architect status report
+  report --export    - Export professional documentation
+
+📊 Project Status:
+  status             - Show overall engineering health  
+  docs               - List all documentation by tier
+
+🔧 System:
+  help <command>     - Get detailed help on command
+  quit               - Exit REPL
+
+💡 Power User Workflow:
+  1. fix --git       - Create safe branch for fixes
+  2. fix             - Interactively resolve all issues  
+  3. validate        - Confirm systematic engineering
+  4. report --export - Generate architect deliverable
+            """)
+    
+    def do_quit(self, arg):
+        """Exit the REPL"""
+        print("👋 Keeping engineering systematic! Goodbye.")
+        return True
+    
+    def do_exit(self, arg):
+        """Exit the REPL"""
+        return self.do_quit(arg)
+    
+    def emptyline(self):
+        """Do nothing on empty line"""
+        pass
+    
+    def _analyze_and_fix_duplicates(self, duplicate_issues):
+        """Intelligently analyze and suggest fixes for duplicate IDs"""
+        print("\n🔍 Analyzing duplicate IDs for smart repair...")
+        
+        for dup_issue in duplicate_issues:
+            # Parse the duplicate issue string
+            parts = dup_issue.split(": ")
+            trace_id = parts[0]
+            count = parts[1].split()[0]
+            
+            print(f"\n🔧 Analyzing {trace_id} ({count} locations):")
+            
+            # Find all instances of this ID
+            locations = []
+            for tid, locs in self.analyzer.traceability_index.items():
+                if str(tid) == trace_id:
+                    locations = locs
+                    break
+            
+            if len(locations) <= 1:
+                continue
+                
+            # Analyze each location
+            definitions = []
+            references = []
+            
+            for filename, position in locations:
+                content = self.analyzer.documents[filename]
+                context = self._get_context_around_position(content, position, 300)
+                
+                # Heuristic: if it has "Decision Type:" or "Derived From:", it's a definition
+                if "Decision Type:" in context or "Derived From:" in context:
+                    definitions.append((filename, context[:100] + "..."))
+                else:
+                    references.append((filename, context[:100] + "..."))
+            
+            # Smart recommendations
+            if len(definitions) > 1:
+                print(f"  ⚠️  Multiple definitions found - this is problematic")
+                print(f"     Definitions in: {[d[0] for d in definitions]}")
+                print(f"  💡 Recommendation: Consolidate into single authoritative definition")
+                print(f"     Keep definition in highest tier document")
+            elif len(definitions) == 1 and len(references) > 0:
+                print(f"  ✅ Good: Single definition with {len(references)} references")
+                print(f"     Definition: {definitions[0][0]}")
+                print(f"     Referenced by: {[r[0] for r in references]}")
+                print(f"  💡 This might be normal cross-referencing")
+            else:
+                print(f"  🤔 All instances appear to be references - missing definition?")
+                print(f"  💡 One of these should be converted to authoritative definition")
+    
+    def _suggest_derivations(self, missing_derivations):
+        """Suggest derivation sources for missing T2+ concepts"""
+        print("\n🔍 Analyzing missing derivations for smart suggestions...")
+        
+        # Group by tier for better analysis
+        by_tier = {}
+        for tid_str in missing_derivations:
+            tier = int(tid_str.split('-')[0][1])
+            if tier not in by_tier:
+                by_tier[tier] = []
+            by_tier[tier].append(tid_str)
+        
+        for tier in sorted(by_tier.keys()):
+            print(f"\n📋 Tier {tier} concepts missing derivations:")
+            
+            for tid_str in by_tier[tier]:
+                print(f"\n🔧 {tid_str}:")
+                
+                # Find where this ID is defined
+                location_info = self._find_id_definition_context(tid_str)
+                if location_info:
+                    filename, context = location_info
+                    print(f"   📄 Defined in: {filename}")
+                    print(f"   📝 Context: {context[:150]}...")
+                    
+                    # Smart suggestions based on context and tier
+                    suggestions = self._suggest_derivation_sources(tid_str, context, filename)
+                    if suggestions:
+                        print(f"   💡 Suggested derivation sources:")
+                        for suggestion in suggestions:
+                            print(f"      - {suggestion}")
+                    
+                    # Generate template for adding derivation
+                    print(f"   📋 Add this after the ID line:")
+                    template = self._generate_derivation_template(tid_str, suggestions)
+                    print(f"      {template}")
+    
+    def _find_id_definition_context(self, tid_str):
+        """Find the context where a traceability ID is defined"""
+        for trace_id, locations in self.analyzer.traceability_index.items():
+            if str(trace_id) == tid_str:
+                # Look for the most complete definition (with Decision Type or description)
+                for filename, position in locations:
+                    content = self.analyzer.documents[filename]
+                    context = self._get_context_around_position(content, position, 200)
+                    
+                    # Prefer locations with more specification content
+                    if "Decision Type:" in context or "Derived From:" in context or len(context) > 100:
+                        return filename, context
+                
+                # Fallback to first location
+                if locations:
+                    filename, position = locations[0]
+                    content = self.analyzer.documents[filename]
+                    context = self._get_context_around_position(content, position, 200)
+                    return filename, context
+        
+        return None
+    
+    def _suggest_derivation_sources(self, tid_str, context, filename):
+        """Suggest likely T1 sources for T2+ concepts"""
+        suggestions = []
+        
+        # Extract concept keywords from context
+        context_lower = context.lower()
+        
+        # Keyword mapping to T1 concepts
+        t1_mappings = {
+            'safety': ['T1-SAFETY-001', 'T1-SAFETY-002'],
+            'torque': ['T1-TORQUE-001', 'T1-PHILOSOPHY-001'],
+            'control': ['T1-PHILOSOPHY-001', 'T1-CONTROL-001'],
+            'ui': ['T1-UI-001'],
+            'behavior': ['T1-BEHAVIOR-001'],
+            'innovation': ['T1-INNOVATION-001']
+        }
+        
+        # Check for keyword matches
+        for keyword, t1_concepts in t1_mappings.items():
+            if keyword in context_lower:
+                for t1_concept in t1_concepts:
+                    if t1_concept not in suggestions:
+                        suggestions.append(t1_concept)
+        
+        # File-based suggestions
+        if 'requirements' in filename.lower():
+            suggestions.append('T1-PHILOSOPHY-001')
+        elif 'architecture' in filename.lower():
+            suggestions.extend(['T1-PHILOSOPHY-001', 'T1-SAFETY-001'])
+        elif 'hardware' in filename.lower():
+            suggestions.extend(['T1-INNOVATION-001', 'T1-SAFETY-002'])
+        
+        return list(set(suggestions))  # Remove duplicates
+    
+    def _generate_derivation_template(self, tid_str, suggestions):
+        """Generate template for adding derivation"""
+        if suggestions:
+            primary = suggestions[0]
+            template = f"**Derived From**: {primary} (VERIFY: Check if this T1 concept is correct source)"
+        else:
+            template = f"**Derived From**: T1-??? (ARCHITECT: Specify which T1 concept this derives from)"
+        
+        return template
+    
+    def _get_context_around_position(self, content, position, radius=200):
+        """Get text context around a position"""
+        start = max(0, position - radius)
+        end = min(len(content), position + radius)
+        return content[start:end]
+    
+    # === SYSTEMATIC ENGINEERING POWER-UP FUNCTIONS ===
+    
+    def _create_fix_branch(self):
+        """Create git branch for systematic engineering fixes"""
+        import subprocess
+        import datetime
+        
+        try:
+            # Check if we're in a git repo
+            subprocess.run(['git', 'status'], capture_output=True, check=True)
+            
+            # Create branch name with timestamp
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            branch_name = f"fix/systematic-engineering-{timestamp}"
+            
+            # Create and checkout branch
+            subprocess.run(['git', 'checkout', '-b', branch_name], capture_output=True, check=True)
+            
+            return branch_name
+        except subprocess.CalledProcessError:
+            return None
+        except FileNotFoundError:
+            print("❌ Git not available")
+            return None
+    
+    def _interactive_fix_selection(self):
+        """Interactive selection and fixing of systematic engineering issues"""
+        print("🎯 Interactive Systematic Engineering Fix Assistant")
+        print("=" * 60)
+        
+        issues = self.analyzer.check_consistency()
+        skeleton_issues = self._find_incomplete_skeletons()
+        
+        all_fixable_issues = []
+        
+        # Add skeleton completion issues
+        if skeleton_issues:
+            print(f"\n📋 {len(skeleton_issues)} Incomplete Architect Skeletons:")
+            for i, (filename, line, placeholder) in enumerate(skeleton_issues[:10], 1):
+                print(f"{i:2}. 📄 {filename}:{line} - {placeholder[:50]}...")
+                all_fixable_issues.append(('skeleton', filename, line, placeholder))
+        
+        # Add missing derivations that can get skeletons
+        if issues['missing_derivations']:
+            print(f"\n📋 {len(issues['missing_derivations'])} Missing Derivations (can generate skeletons):")
+            for i, tid in enumerate(issues['missing_derivations'][:10], len(all_fixable_issues) + 1):
+                print(f"{i:2}. 🔗 {tid} - needs derivation documentation")
+                all_fixable_issues.append(('derivation', tid, None, None))
+        
+        # Add conflict detection for duplicates
+        if issues['duplicate_ids']:
+            print(f"\n📋 {len(issues['duplicate_ids'])} Duplicate IDs (need conflict resolution):")
+            for i, dup in enumerate(issues['duplicate_ids'][:5], len(all_fixable_issues) + 1):
+                trace_id = dup.split(':')[0]
+                print(f"{i:2}. ⚠️  {trace_id} - multiple definitions need resolution")
+                all_fixable_issues.append(('duplicate', trace_id, None, None))
+        
+        if not all_fixable_issues:
+            print("✅ No fixable issues found!")
+            return
+        
+        print(f"\n🔧 Select issues to fix (1-{len(all_fixable_issues)}, 'all', or 'quit'):")
+        
+        try:
+            response = input("Selection: ").strip().lower()
+            
+            if response == 'quit':
+                return
+            elif response == 'all':
+                print("🚀 Fixing all issues...")
+                for issue_type, *args in all_fixable_issues:
+                    self._apply_fix(issue_type, *args)
+            else:
+                try:
+                    selection = int(response)
+                    if 1 <= selection <= len(all_fixable_issues):
+                        issue_type, *args = all_fixable_issues[selection - 1]
+                        self._apply_fix(issue_type, *args)
+                    else:
+                        print(f"❌ Invalid selection. Choose 1-{len(all_fixable_issues)}")
+                except ValueError:
+                    print("❌ Invalid input. Enter number, 'all', or 'quit'")
+        
+        except KeyboardInterrupt:
+            print("\n👋 Fix session interrupted")
+    
+    def _fix_specific_issue(self, trace_id):
+        """Fix a specific traceability issue"""
+        print(f"🔧 Fixing specific issue: {trace_id}")
+        
+        # Check if it's a missing derivation
+        issues = self.analyzer.check_consistency()
+        if trace_id in issues['missing_derivations']:
+            self._apply_fix('derivation', trace_id)
+            return
+        
+        # Check if it's a duplicate
+        for dup_issue in issues['duplicate_ids']:
+            if trace_id in dup_issue:
+                self._apply_fix('duplicate', trace_id)
+                return
+        
+        print(f"❌ Issue {trace_id} not found or not fixable")
+    
+    def _apply_fix(self, issue_type, *args):
+        """Apply a specific fix with conflict detection"""
+        if issue_type == 'skeleton':
+            filename, line, placeholder = args
+            print(f"📝 Completing skeleton in {filename}:{line}")
+            # For now, just notify - in full implementation would edit file
+            print(f"   TODO: Replace '{placeholder[:30]}...' with architect content")
+        
+        elif issue_type == 'derivation':
+            trace_id = args[0]
+            print(f"🔗 Generating derivation skeleton for {trace_id}")
+            skeleton = self._generate_derivation_skeleton(trace_id)
+            print(f"📋 Skeleton generated:")
+            print(f"   {skeleton}")
+            
+        elif issue_type == 'duplicate':
+            trace_id = args[0]
+            print(f"⚠️  Analyzing duplicate: {trace_id}")
+            conflicts = self._detect_conflicts(trace_id)
+            if conflicts:
+                print(f"🚨 Conflicts detected:")
+                for conflict in conflicts:
+                    print(f"   - {conflict}")
+                print("💡 Manual resolution required")
+            else:
+                print("✅ No conflicts - safe to consolidate")
+    
+    def _find_incomplete_skeletons(self):
+        """Find incomplete architect skeletons that need completion"""
+        skeleton_issues = []
+        
+        architect_placeholders = [
+            '[ARCHITECT:',
+            'TODO - Architect',
+            'ARCHITECT REVIEW REQUIRED',
+            'VERIFY: Check if'
+        ]
+        
+        for filename, content in self.analyzer.documents.items():
+            lines = content.split('\n')
+            for line_num, line in enumerate(lines, 1):
+                for placeholder in architect_placeholders:
+                    if placeholder in line:
+                        skeleton_issues.append((filename, line_num, line.strip()))
+                        break
+        
+        return skeleton_issues
+    
+    def _generate_derivation_skeleton(self, trace_id):
+        """Generate a derivation skeleton for missing traceability"""
+        # Find where this ID is currently defined
+        location_info = self._find_id_definition_context(trace_id)
+        
+        if location_info:
+            filename, context = location_info
+            suggestions = self._suggest_derivation_sources(trace_id, context, filename)
+            
+            if suggestions:
+                primary_suggestion = suggestions[0]
+                skeleton = f"""**Derived From**: {primary_suggestion} ([ARCHITECT: Verify this T1 source])  
+**Decision Type**: [ARCHITECT: 🎯 Creative/🔗 Derivation/⚠️ Engineering Decision]  
+**Engineering Rationale**: [ARCHITECT: Provide justification]  
+**AI Traceability**: [ARCHITECT: Specify implementation guidance]"""
+            else:
+                skeleton = f"""**Derived From**: T1-??? ([ARCHITECT: Specify T1 source])  
+**Decision Type**: [ARCHITECT: 🎯 Creative/🔗 Derivation/⚠️ Engineering Decision]  
+**Engineering Rationale**: [ARCHITECT: Provide justification]  
+**AI Traceability**: [ARCHITECT: Specify implementation guidance]"""
+        else:
+            skeleton = f"""**🔗 {trace_id}**: **[ARCHITECT: Define concept]**  
+**Derived From**: T1-??? ([ARCHITECT: Specify T1 source])  
+**Decision Type**: [ARCHITECT: 🎯 Creative/🔗 Derivation/⚠️ Engineering Decision]  
+**Engineering Rationale**: [ARCHITECT: Provide justification]  
+**AI Traceability**: [ARCHITECT: Specify implementation guidance]"""
+        
+        return skeleton
+    
+    def _detect_conflicts(self, trace_id):
+        """Detect conflicts that would be caused by fixing this issue"""
+        conflicts = []
+        
+        # Find all references to this ID
+        for filename, content in self.analyzer.documents.items():
+            if trace_id in content:
+                # Count references
+                ref_count = content.count(trace_id)
+                if ref_count > 1:
+                    conflicts.append(f"{filename} has {ref_count} references - consolidation needed")
+        
+        # Check for cross-document dependencies
+        for filename, refs in self.analyzer.cross_references.items():
+            for ref in refs:
+                if trace_id in self.analyzer.documents.get(ref, ''):
+                    conflicts.append(f"{filename} cross-references {ref} which contains {trace_id}")
+        
+        return conflicts
+    
+    def _generate_architect_report(self, format_type='markdown'):
+        """Generate comprehensive architect report"""
+        issues = self.analyzer.check_consistency()
+        skeleton_issues = self._find_incomplete_skeletons()
+        
+        total_issues = sum(len(v) for v in issues.values()) + len(skeleton_issues)
+        health_score = max(0, 100 - (total_issues * 2))
+        
+        if format_type == 'json':
+            import json
+            report_data = {
+                'timestamp': str(datetime.datetime.now()),
+                'health_score': health_score,
+                'total_documents': len(self.analyzer.documents),
+                'total_traceability_ids': len(self.analyzer.traceability_index),
+                'issues': {
+                    'total': total_issues,
+                    'skeleton_incomplete': len(skeleton_issues),
+                    'missing_derivations': len(issues['missing_derivations']),
+                    'duplicate_ids': len(issues['duplicate_ids']),
+                    'broken_cross_refs': len(issues['broken_cross_refs'])
+                },
+                'documents': list(self.analyzer.documents.keys()),
+                'traceability_coverage': self._get_tier_coverage()
+            }
+            return json.dumps(report_data, indent=2)
+        
+        else:  # markdown format
+            import datetime
+            report = f"""# RumbleDome Systematic Engineering Report
+
+**Generated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Executive Summary
+
+📊 **Health Score**: {health_score}% {'✅' if health_score > 90 else '⚠️' if health_score > 70 else '❌'}  
+📄 **Documents**: {len(self.analyzer.documents)}  
+🔗 **Traceability IDs**: {len(self.analyzer.traceability_index)}  
+⚠️ **Issues Requiring Attention**: {total_issues}
+
+## Issue Breakdown
+
+### Incomplete Architect Skeletons: {len(skeleton_issues)}
+{"".join([f"- {filename}:{line} - {placeholder[:80]}...\n" for filename, line, placeholder in skeleton_issues[:10]])}
+{"" if len(skeleton_issues) <= 10 else f"... and {len(skeleton_issues) - 10} more\n"}
+
+### Missing Derivations: {len(issues['missing_derivations'])}
+{"".join([f"- {tid}\n" for tid in issues['missing_derivations'][:10]])}
+{"" if len(issues['missing_derivations']) <= 10 else f"... and {len(issues['missing_derivations']) - 10} more\n"}
+
+### Duplicate IDs: {len(issues['duplicate_ids'])}
+{"".join([f"- {dup}\n" for dup in issues['duplicate_ids'][:10]])}
+{"" if len(issues['duplicate_ids']) <= 10 else f"... and {len(issues['duplicate_ids']) - 10} more\n"}
+
+## Traceability Coverage
+
+{self._format_tier_coverage_report()}
+
+## Recommendations
+
+💡 **Immediate Actions**:
+1. Complete {len(skeleton_issues)} architect skeletons
+2. Add derivation documentation for {len(issues['missing_derivations'])} concepts
+3. Resolve {len(issues['duplicate_ids'])} duplicate ID conflicts
+
+🚀 **Next Steps**:
+- Use `./cli fix --git` to create safe branch for fixes
+- Run `./cli validate --blocking` before commits
+- Maintain health score >90% for optimal systematic engineering
+
+---
+*Generated by RumbleDome Engineering Assistant*
+"""
+            return report
+    
+    def _get_tier_coverage(self):
+        """Get traceability coverage by tier"""
+        tier_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+        for trace_id in self.analyzer.traceability_index:
+            if trace_id.tier in tier_counts:
+                tier_counts[trace_id.tier] += 1
+        return tier_counts
+    
+    def _format_tier_coverage_report(self):
+        """Format tier coverage for markdown report"""
+        tier_counts = self._get_tier_coverage()
+        report = ""
+        for tier, count in tier_counts.items():
+            bar_filled = "█" * (count // 2)
+            bar_empty = "░" * (10 - len(bar_filled))
+            report += f"- **Tier {tier}**: {bar_filled}{bar_empty} {count} IDs\n"
+        return report
+
+class DocumentationAnalyzer:
+    """Core analysis engine for RumbleDome documentation"""
+    
+    def __init__(self):
+        self.docs_dir = DOCS_DIR
+        self.documents = {}
+        self.traceability_index = {}
+        self.cross_references = {}
+        self.load_documents()
+    
+    def load_documents(self):
+        """Load and index all documentation"""
+        if not self.docs_dir.exists():
+            return
+        
+        for md_file in self.docs_dir.glob("*.md"):
+            try:
+                with open(md_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    self.documents[md_file.name] = content
+                    self._index_content(md_file.name, content)
+            except Exception as e:
+                print(f"⚠️  Failed to load {md_file.name}: {e}")
+    
+    def _index_content(self, filename, content):
+        """Index traceability and cross-references"""
+        # Index traceability IDs
+        pattern = r'T(\d)-([A-Z-]+)-(\d+)'
+        for match in re.finditer(pattern, content):
+            trace_id = TraceabilityID(
+                int(match.group(1)), 
+                match.group(2), 
+                int(match.group(3)),
+                match.group(0)
+            )
+            
+            if trace_id not in self.traceability_index:
+                self.traceability_index[trace_id] = []
+            self.traceability_index[trace_id].append((filename, match.start()))
+        
+        # Index cross-references  
+        refs = re.findall(r'\[([^\]]+\.md)\]', content)
+        self.cross_references[filename] = refs
+    
+    def find_traceability_for_concept(self, concept):
+        """Find traceability IDs related to concept"""
+        matches = []
+        concept_words = concept.lower().split()
+        
+        for trace_id, locations in self.traceability_index.items():
+            for filename, position in locations:
+                content = self.documents[filename]
+                
+                # Get context around the traceability ID
+                start = max(0, position - 200)
+                end = min(len(content), position + 200)
+                context = content[start:end].lower()
+                
+                # Simple word matching - could enhance with AI
+                if any(word in context for word in concept_words):
+                    line = self._get_line_at_position(content, position)
+                    matches.append((trace_id, filename, line.strip()))
+        
+        return matches
+    
+    def check_consistency(self):
+        """Check for documentation consistency issues"""
+        issues = {
+            'broken_cross_refs': [],
+            'duplicate_ids': [],
+            'missing_derivations': []
+        }
+        
+        # Check broken cross-references
+        for filename, refs in self.cross_references.items():
+            for ref in refs:
+                if ref not in self.documents:
+                    issues['broken_cross_refs'].append(f"{filename} → {ref}")
+        
+        # Check duplicate IDs
+        for trace_id, locations in self.traceability_index.items():
+            if len(locations) > 1:
+                issues['duplicate_ids'].append(f"{trace_id}: {len(locations)} locations")
+        
+        # Check missing derivations for T2+ IDs
+        for trace_id, locations in self.traceability_index.items():
+            if trace_id.tier > 1:
+                has_derivation = False
+                for filename, position in locations:
+                    content = self.documents[filename]
+                    start = max(0, position - 300)
+                    end = min(len(content), position + 300)
+                    nearby = content[start:end]
+                    
+                    if "Derived From:" in nearby or "Decision Type:" in nearby:
+                        has_derivation = True
+                        break
+                
+                if not has_derivation:
+                    issues['missing_derivations'].append(str(trace_id))
+        
+        return issues
+    
+    def suggest_next_id(self, category):
+        """Suggest next available ID in category"""
+        category_ids = [
+            tid for tid in self.traceability_index.keys() 
+            if tid.category == category
+        ]
+        
+        if not category_ids:
+            return f"T2-{category}-001"
+        
+        max_num = max(tid.number for tid in category_ids if tid.tier == 2)
+        return f"T2-{category}-{max_num + 1:03d}"
+    
+    def generate_spec_template(self, feature_name):
+        """Generate specification template"""
+        next_id = self.suggest_next_id("CONTROL")
+        
+        return f'''## {feature_name.title()} Implementation
+
+**🔗 {next_id}**: **{feature_name.title()} Specification**  
+**Derived From**: TODO - Architect specify T1 source  
+**Decision Type**: ⚠️ **Engineering Decision**  
+**Engineering Rationale**: TODO - Architect provide justification  
+**AI Traceability**: TODO - Specify T3/T4 implementation guidance
+
+### Requirements
+TODO - Architect define functional requirements
+
+### Implementation Details  
+TODO - Architect specify technical approach
+
+### Safety Considerations
+TODO - Architect define safety requirements
+
+### Interface Specification
+TODO - Architect define APIs and integration
+
+---
+**⚠️  ARCHITECT REVIEW REQUIRED**: Complete TODOs before AI implementation'''
+    
+    def find_dependencies(self, filename):
+        """Find documents that depend on this file"""
+        deps = []
+        for doc, refs in self.cross_references.items():
+            if filename in refs and doc != filename:
+                deps.append(doc)
+        return deps
+    
+    def get_traceability_ids(self, filename):
+        """Get all traceability IDs defined in file"""
+        if filename not in self.documents:
+            return []
+        
+        content = self.documents[filename]
+        pattern = r'T(\d)-([A-Z-]+)-(\d+)'
+        matches = re.findall(pattern, content)
+        return [f"T{t[0]}-{t[1]}-{t[2]}" for t in matches]
+    
+    def _get_line_at_position(self, content, position):
+        """Get the line containing the given position"""
+        line_start = content.rfind('\n', 0, position) + 1
+        line_end = content.find('\n', position)
+        if line_end == -1:
+            line_end = len(content)
+        return content[line_start:line_end]
+
+class TraceabilityID:
+    """Represents a traceability ID like T2-CONTROL-008"""
+    
+    def __init__(self, tier, category, number, full_id):
+        self.tier = tier
+        self.category = category
+        self.number = number
+        self.full_id = full_id
+    
+    def __str__(self):
+        return self.full_id
+    
+    def __eq__(self, other):
+        return self.full_id == other.full_id
+    
+    def __hash__(self):
+        return hash(self.full_id)
+
+def run_command_mode(args):
+    """Run single command and exit"""
+    analyzer = DocumentationAnalyzer()
+    
+    if args.command == 'trace':
+        if not args.concept:
+            print("❌ Please provide a concept")
+            return
+        
+        matches = analyzer.find_traceability_for_concept(args.concept)
+        if matches:
+            print(f"✅ Found {len(matches)} matches:")
+            for trace_id, filename, context in matches:
+                print(f"  {trace_id} in {filename}")
+        else:
+            next_id = analyzer.suggest_next_id("CONTROL")
+            print(f"❌ No matches found. Suggested: {next_id}")
+    
+    elif args.command == 'audit':
+        # For command-line mode, always run with --fix for intelligent suggestions
+        print("🔍 Auditing documentation consistency (with intelligent repair suggestions)...")
+        
+        issues = analyzer.check_consistency()
+        total = sum(len(v) for v in issues.values())
+        
+        if total == 0:
+            print("✅ All documentation consistent")
+            return
+        
+        print(f"⚠️  Found {total} issues requiring attention")
+        
+        # Show smart repair suggestions for command-line mode
+        if issues['duplicate_ids']:
+            print(f"\n📋 Analyzing {len(issues['duplicate_ids'])} duplicate IDs...")
+            # Simplified analysis for command line
+            for dup in issues['duplicate_ids'][:3]:  # Show first 3 examples
+                parts = dup.split(": ")
+                trace_id = parts[0]
+                count = parts[1].split()[0]
+                print(f"  ⚠️  {trace_id} appears {count} times - may need consolidation")
+            
+            if len(issues['duplicate_ids']) > 3:
+                print(f"  ... and {len(issues['duplicate_ids']) - 3} more")
+        
+        if issues['missing_derivations']:
+            print(f"\n📋 {len(issues['missing_derivations'])} concepts missing derivation documentation")
+            print(f"  💡 Use interactive mode for smart suggestions: ./cli")
+        
+        print(f"\n💡 For detailed repair assistance, run: ./cli (interactive mode)")
+    
+    elif args.command == 'help':
+        print(__doc__)
+
+def main():
+    # Check if arguments provided for command mode
+    if len(sys.argv) > 1 and sys.argv[1] not in ['repl', 'interactive']:
+        parser = argparse.ArgumentParser(description='RumbleDome Engineering Assistant')
+        parser.add_argument('command', choices=['trace', 'audit', 'impact', 'spec', 'status', 'help'])
+        parser.add_argument('concept', nargs='?', help='Concept for trace command')
+        
+        args = parser.parse_args()
+        run_command_mode(args)
+    else:
+        # Interactive REPL mode
+        try:
+            RumbleDomeREPL().cmdloop()
+        except KeyboardInterrupt:
+            print("\n👋 Interrupted. Engineering discipline maintained!")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
+if __name__ == '__main__':
+    main()
