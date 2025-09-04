@@ -4,6 +4,11 @@
 
 📖 **For terminology**: See **[Definitions.md](Definitions.md)** for technical concepts and acronyms used throughout this document
 
+**🔗 T1-PHILOSOPHY-005**: **Comprehensive Diagnostics and Observability**  
+**Decision Type**: 🎯 **Core Philosophy** - Expose system internals for troubleshooting despite simplified user interface  
+**Engineering Rationale**: Complex auto-learning systems require detailed observability for field debugging and development  
+**AI Traceability**: Drives logging architecture, diagnostic interfaces, fault reporting, and development tooling
+
 ## System Overview
 
 RumbleDome is a torque-aware electronic boost controller that cooperates with modern ECU torque management systems rather than fighting them. The system prioritizes predictable, configurable boost response to maintain ECU driver demand table validity while providing safety-critical overboost protection.
@@ -63,12 +68,24 @@ RumbleDome implements a **priority hierarchy with aggression-mediated balance** 
 ## Physical System Architecture
 
 ### Pneumatic Control System
-- **Air Supply**: Compressed air regulated from ~150 psi to configurable input pressure (typically 10-20 psi)
+- **Air Supply**: Compressed air regulated from ~150 psi to calculated nominal feed pressure
+- **Air-Efficient Control Strategy**: Bias toward 100% duty cycle (wastegate closed) for steady-state operation
+  - **Steady-state closed operation** (vacuum conditions) = 100% duty = no air consumption
+  - **Progressive easing function** for smooth transitions from closed to active boost control
+  - **Compressor-friendly operation** - minimal air usage during majority of drive time
 - **4-Port MAC Solenoid**: Controls dome pressure distribution
   - 0% duty → Lower dome pressurized, upper dome vented → Wastegate forced OPEN
   - 100% duty → Upper dome pressurized, lower dome vented → Wastegate forced CLOSED
-- **Wastegate Spring**: 5 psi (configurable) provides mechanical failsafe and baseline control authority
+- **Wastegate Spring**: Configurable spring pressure (minimum 5 psi to prevent flutter) provides mechanical failsafe and baseline control authority
 - **Dome Control**: Full-dome system with constant pressure feed enables boost control both above and below spring pressure
+
+**Spring Optimization Strategy:**
+- **Standard Configuration**: 5+ PSI spring ensures smooth failure mode (predictable boost if pneumatics fail)
+- **Minimum Spring Optimization**: 2-3 PSI spring for maximum control resolution, with active flutter prevention
+  - **Flutter Prevention Logic**: Maintain `Upper Dome Pressure + Spring Pressure >= 5 PSI` when wastegate commanded closed
+  - **Sensor-Based Control**: Use dome pressure sensors to actively prevent flutter through pressure management
+  - **Failure Mode Trade-off**: Pneumatic failure results in low boost + potential flutter until repaired
+  - **Use Case**: Optimal for track-only or closely monitored applications prioritizing control precision
 
 ### Sensor Configuration
 1. **Dome Input Pressure**: Monitors air supply pressure for feedforward compensation
@@ -202,7 +219,7 @@ fn execute_control_cycle(&mut self, pwm_timing: &PwmTimingInfo) -> Result<(), Co
 **AI Traceability**: Drives calibration progression logic, safety validation, confidence tracking
 
 **Progressive Safety Approach**:
-- Phase 1: Ultra-conservative limits (spring + 1 psi)
+- Phase 1: Ultra-conservative limits (spring pressure + 1 psi)
 - Phase 2: Gradual expansion based on proven safety response
 - Phase 3: Target achievement with full safety validation
 
@@ -233,6 +250,89 @@ For each (RPM, Boost_Target) pair:
 - **Critical Faults**: Immediate duty=0%, system halt, display fault
 - **Sensor Faults**: Invalid readings, CAN timeouts, storage errors
 - **Calibration Faults**: Inconsistent learning data, safety response failures
+
+#### Auto-Learning Pneumatic System
+
+**🔗 T2-CONTROL-009**: **Adaptive Pneumatic System with Feed Pressure Compensation**  
+**Derived From**: T1-PHILOSOPHY-001 (Single-Knob Philosophy) + Physics.md pneumatic system dynamics  
+**Decision Type**: ⚠️ **Engineering Decision** - Auto-learning system for pneumatic optimization  
+**Engineering Rationale**: Feed pressure variations from low-cost regulators require real-time compensation for stable control  
+**AI Traceability**: Drives T4-CORE-010+ auto-learning implementations, feed pressure monitoring, and adaptive control algorithms
+
+**Pneumatic System Architecture:**
+
+**Feed Pressure Management:**
+- **Calculated nominal feed pressure** - optimizes control resolution vs. safety authority trade-off per build
+- **Feed pressure calculation**: `Nominal Feed Pressure = Spring Pressure + Safety Margin + (Target Boost × Scaling Factor)`
+  - **Safety Margin**: 3 PSI minimum (universal constraint for reliable opening authority)
+  - **Scaling Factor**: 0.6 (empirical factor for boost scaling, adjustable per application)
+- **Real-time feed pressure monitoring** - compensates for regulator imprecision and drift
+- **Pressure-normalized learning** - all learned parameters adjusted for actual vs. nominal feed pressure
+- **Dynamic compensation factor**: `compensated_duty_cycle = base_duty_cycle × (nominal_feed_pressure / actual_feed_pressure)`
+
+**Multi-Layer Auto-Learning Protocol:**
+
+**Layer 0: System Bootstrap and Validation (Key-On Procedure)**
+- **Feed Pressure Wait** - monitor feed pressure until minimum threshold reached (Spring Pressure + Safety Margin)
+- **Pressure Stabilization** - wait for feed pressure stable within ±0.5 PSI for 2-3 seconds
+- **Session Baseline Capture** - record stabilized pressure as compensation baseline for current session
+- **Feed Pressure Optimization Check** - validate pressure against calculated optimal range
+  - **Max Useful Pressure**: `Overboost Limit + Spring Pressure + Fudge Factor`
+  - **Scaled Fudge Factor**: `Base Margin (2-3 PSI) + (Overboost Limit × 0.15)`
+  - **Control Range Validation**: Ensure minimum 20% usable duty cycle range for stable operation
+  - **Warning Thresholds**: Yellow warning if above optimal, red warning if control range <20%
+- **Dome Connectivity Test** - cycle solenoid 0%→100%→0% and verify both domes respond with expected pressure changes
+- **Cross-Connection Detection** - test for reversed upper/lower dome lines through pressure response polarity
+- **Safety Authority Verification** - confirm 0% duty cycle can achieve wastegate opening force (lower dome > spring + exhaust pressure)
+- **System Health Gate** - require all Layer 0 tests to pass before enabling boost control or higher learning layers
+- **Installation Diagnostics** - provide specific error codes and guidance for plumbing corrections if tests fail
+- **User Feedback** - display "Initializing Pneumatics..." during wait, "RumbleDome Ready" when complete
+
+**Layer 1: Pneumatic System Characterization**
+- **Feed pressure baseline measurement** and deviation tracking from calculated nominal pressure
+- **Dome response time constants** - measure upper/lower dome pressurization and evacuation rates
+- **System bandwidth detection** - determine maximum useful control frequency for stable operation
+- **Regulator health monitoring** - track pressure stability and recovery characteristics
+
+**Layer 2: Boost Control Mapping**  
+- **Critical range mapping** (0% to calculated safety threshold duty cycle) with 5% increment resolution testing
+- **Pressure-normalized control tables** - store all learning data relative to calculated nominal feed pressure baseline
+- **Safety threshold detection** - identify duty cycle limits for overboost protection
+- **Transient response characterization** - measure boost response times and settling behavior
+
+**Layer 3: Runtime Adaptive Optimization**
+- **Continuous feed pressure compensation** - real-time adjustment for regulator variations
+- **Performance degradation detection** - monitor response times for maintenance indication
+- **Environmental adaptation** - compensate for temperature effects on pneumatic components
+- **Torque-following integration** - apply learned parameters to ECU torque gap responses
+
+**Auto-Learning Safety Integration:**
+
+**Startup System Validation:**
+- **Feed pressure adequacy check** - verify minimum (Spring Pressure + Safety Margin) for adequate opening authority
+- **Dome response validation** - confirm pneumatic system can achieve required response rates
+- **Safety authority confirmation** - validate overboost protection capability before operation
+- **Fallback to defaults** - use conservative pre-programmed parameters if learning fails
+
+**Runtime Safety Monitoring:**
+- **Feed pressure fault detection** - alert when pressure drops below safe operating threshold
+- **Compensation limit enforcement** - prevent compensation from exceeding safe duty cycle ranges  
+- **Learning data validation** - verify new learning data is consistent with safety requirements
+- **Emergency bypass** - disable auto-learning and use defaults during fault conditions
+
+**System Health Diagnostics:**
+- **Regulator performance trending** - track pressure stability degradation over time
+- **Pneumatic component health** - monitor dome response time changes indicating wear/damage
+- **Learning convergence analysis** - ensure auto-learning produces stable, repeatable results
+- **Predictive maintenance alerts** - warn when system performance indicates service needs
+
+**Integration with Torque-Following Control:**
+- **Pressure-compensated boost targeting** - apply learned compensation to torque gap responses  
+- **Adaptive rate limiting** - use learned system bandwidth to prevent control instability
+- **Performance optimization** - continuously refine torque response based on pneumatic system capability
+- **Aggression scaling integration** - apply learned parameters across full aggression range (0.0-1.0)
+
+This auto-learning pneumatic system transforms RumbleDome from a static boost controller into an **adaptive, self-optimizing system** that automatically compensates for hardware variations, component aging, and environmental changes while maintaining safety authority and control precision.
 
 ## Data Architecture
 
@@ -281,6 +381,87 @@ For each (RPM, Boost_Target) pair:
 - **Atomic Operations**: Crash-safe writes using temp files and atomic renames
 - **Automatic Backups**: Rolling backups preserve data integrity across system updates
 - **Graceful Degradation**: System continues with defaults if SD card fails
+
+## Diagnostics and Logging Architecture
+
+**🔗 T2-DIAGNOSTICS-001**: **Multi-Output Logging System**  
+**Derived From**: T1-PHILOSOPHY-005 (Comprehensive Diagnostics)  
+**Decision Type**: ⚠️ **Engineering Decision** - Structured logging with multiple output channels  
+**Engineering Rationale**: Complex auto-learning system requires detailed observability without impacting real-time performance  
+**AI Traceability**: Drives debugging interfaces, field troubleshooting tools, and development workflows
+
+**Logging Output Channels:**
+- **Console Output** - real-time debugging during development and bench testing
+- **Serial/Bluetooth** - wireless diagnostic interface for field troubleshooting  
+- **SD Card Filesystem** - persistent logging for trend analysis and post-incident review
+- **Display Integration** - critical alerts and status on main user interface
+
+**Log Level Hierarchy:**
+- **CRITICAL** - system faults requiring immediate user attention (overboost, sensor failures)
+- **WARNING** - degraded performance or maintenance indicators (pressure drift, learning convergence issues)
+- **INFO** - operational state changes (boost events, learning progress, configuration changes)
+- **DEBUG** - detailed system internals (sensor readings, control loop calculations, CAN messages)
+- **TRACE** - high-frequency data streams (pneumatic response timing, duty cycle adjustments)
+
+**Structured Logging Categories:**
+- **PNEUMATIC** - feed pressure, dome pressures, solenoid response, leak detection, regulator health
+- **CONTROL** - PID calculations, duty cycle commands, boost targeting, torque gap analysis
+- **LEARNING** - auto-learning progress, calibration data updates, convergence metrics
+- **SAFETY** - overboost events, fault conditions, emergency responses, safety authority verification
+- **CAN** - ECU communication, torque signals, message timing, protocol errors
+- **SYSTEM** - startup/shutdown, configuration changes, SD card operations, memory usage
+
+**Log Storage Strategy:**
+- **Ring Buffer** - recent logs in RAM for immediate access via diagnostic interface (all log levels)
+- **Rolling Files** - daily log files with automatic cleanup (keep last 30 days)
+- **SD Card Write Protection** - default to logging only CRITICAL and WARNING events to minimize SD wear
+- **Runtime Log Level Control** - users can increase logging verbosity via console interface for debugging
+- **Structured Format** - JSON or CSV for machine parsing and analysis tools
+- **Compression** - older logs compressed to minimize SD card usage
+- **Export Capability** - logs can be extracted for external analysis or support requests
+
+**Diagnostic Interface:**
+- **Live Data Stream** - real-time sensor values and system state via Bluetooth
+- **Historical Analysis** - trend plotting and pattern recognition from stored logs  
+- **Fault Code System** - standardized error codes with troubleshooting guidance
+- **Learning Visibility** - view auto-learning progress and calibration confidence levels
+- **Performance Metrics** - system health scores and maintenance predictions
+
+**🔗 T2-DIAGNOSTICS-002**: **Pneumatic Fault Detection Algorithms**  
+**Derived From**: T2-DIAGNOSTICS-001 (Multi-Output Logging) + pneumatic system reliability requirements  
+**Decision Type**: ⚠️ **Engineering Decision** - Real-time pneumatic system health monitoring  
+**Engineering Rationale**: Early fault detection prevents system damage and enables predictive maintenance  
+**AI Traceability**: Drives fault response protocols, maintenance scheduling, and system reliability metrics
+
+**Blown Hose Detection:**
+- **Pressurization Test** - command dome pressurization and verify pressure response reaches >50% of feed pressure within 2 seconds
+- **Upper Dome Test** - 100% duty cycle should pressurize upper dome to near feed pressure level
+- **Lower Dome Test** - 0% duty cycle should pressurize lower dome to near feed pressure level  
+- **Blown Hose Indication** - commanded dome fails to reach expected pressure (remains near atmospheric + small line segment pressure)
+- **Bootstrap Integration** - active testing during Layer 0 system validation
+- **Runtime Monitoring** - verify expected pressure response any time significant dome pressurization is commanded
+
+**Feed Pressure Monitoring:**
+- **Session Drift Detection** - feed pressure varies >1.5 PSI from established baseline during single drive
+- **Historical Trending** - session baselines drift >0.5 PSI/week indicating regulator degradation
+- **Stability Threshold** - feed pressure variance >±0.3 PSI over 30 second window during steady state
+- **Adequacy Thresholds** - WARNING when <(Spring Pressure + 2 PSI), CRITICAL when <Spring Pressure
+
+**Solenoid Valve Health:**
+- **Response Timeout** - dome pressure change <1 PSI within 2 seconds of 50% duty cycle command
+- **Sticking Detection** - duty cycle changes >15% produce <0.2 PSI dome response (when commands should produce response)
+- **Recovery Protocol** - attempt 0%→100%→0% cycle up to 3 times before declaring fault
+- **Command Validation** - only monitor response when duty cycle change should produce measurable pressure change
+
+**System Response Degradation:**
+- **Slow Response Detection** - dome pressure change takes >3 seconds to reach 90% of expected change
+- **Trend Tracking** - response times increase >50% compared to Layer 1 learning baseline
+- **Maintenance Alerts** - WARNING when response times exceed 2x baseline, schedule predictive maintenance
+
+**Fault Response Protocols:**
+- **CRITICAL Faults** (blown hose, inadequate feed pressure) - immediate duty=0%, disable boost control, display fault code
+- **WARNING Faults** (pressure drift, slow response) - continue operation with compensation, log for maintenance scheduling
+- **Recovery Attempts** - automated recovery cycles for intermittent faults before escalating to manual intervention
 
 ## Extensibility Architecture
 
