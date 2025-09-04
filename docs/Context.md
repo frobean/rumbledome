@@ -79,9 +79,24 @@ Before modifying this document:
 ## Operating Concept: 3-Tier Control Philosophy
 
 **🔗 T1-PHILOSOPHY-001**: **3-Tier Priority Hierarchy**  
-**Decision Type**: 🎯 **Core Creative Concept**  
-**Rationale**: Novel approach to balance safety, performance, and comfort in single system  
-**AI Traceability**: All control algorithms must implement this hierarchy  
+**Decision Type**: 🎯 **Core Philosophy**  
+**Creative Rationale**: Novel approach to balance safety, performance, and comfort in single system  
+**AI Traceability**: All control algorithms must implement this hierarchy
+
+**🔗 T1-PHILOSOPHY-003**: **Comfort and Driveability Priority**  
+**Decision Type**: 🎯 **Core Philosophy** - OEM-style driveability over peak performance  
+**Creative Rationale**: Smooth, refined operation that doesn't feel "aftermarket" aggressive  
+**AI Traceability**: Drives rate limiting, transition management, and aggression scaling systems
+
+**🔗 T1-PHILOSOPHY-004**: **Auto-Learning System Philosophy**  
+**Decision Type**: 🎯 **Core Philosophy** - System learns and adapts rather than requiring manual tuning  
+**Creative Rationale**: Eliminates need for technical expertise, automatically optimizes for specific hardware  
+**AI Traceability**: Drives calibration algorithms, adaptive control, and hardware compensation systems
+
+**🔗 T1-PHILOSOPHY-005**: **Comprehensive Diagnostics and Observability**  
+**Decision Type**: 🎯 **Core Philosophy** - Expose system internals for troubleshooting despite simplified user interface  
+**Creative Rationale**: Complex auto-learning systems require detailed observability for field debugging and development  
+**AI Traceability**: Drives logging architecture, diagnostic interfaces, fault reporting, and development tooling  
 
 RumbleDome operates on a **priority hierarchy with aggression-mediated balance**:
 
@@ -144,8 +159,13 @@ RumbleDome operates on a **priority hierarchy with aggression-mediated balance**
 
 ### **Torque-Following Logic**
 
-**🔗 T1-TORQUE-001**: **ECU Cooperation Philosophy**  
-**Decision Type**: 🎯 **Fundamental System Approach**  
+**🔗 T1-PHILOSOPHY-002**: **ECU Cooperation Philosophy**  
+**Decision Type**: 🎯 **Core Philosophy** - Amplify ECU intent rather than override it  
+**Creative Rationale**: Novel approach that works with modern torque management instead of fighting it  
+**AI Traceability**: Drives all control algorithms, CAN integration, and torque-following systems
+
+**🔗 T1-TORQUE-001**: **ECU Cooperation Implementation**  
+**Decision Type**: 🔗 **Direct Derivation** - Implementation of T1-PHILOSOPHY-002  
 **Creative Rationale**: Amplify ECU intent rather than override it - novel in EBC market  
 **AI Traceability**: Drives all control algorithms, CAN integration, learning systems
 

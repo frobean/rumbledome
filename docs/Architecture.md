@@ -4,10 +4,6 @@
 
 📖 **For terminology**: See **[Definitions.md](Definitions.md)** for technical concepts and acronyms used throughout this document
 
-**🔗 T1-PHILOSOPHY-005**: **Comprehensive Diagnostics and Observability**  
-**Decision Type**: 🎯 **Core Philosophy** - Expose system internals for troubleshooting despite simplified user interface  
-**Engineering Rationale**: Complex auto-learning systems require detailed observability for field debugging and development  
-**AI Traceability**: Drives logging architecture, diagnostic interfaces, fault reporting, and development tooling
 
 ## System Overview
 
@@ -334,6 +330,245 @@ For each (RPM, Boost_Target) pair:
 
 This auto-learning pneumatic system transforms RumbleDome from a static boost controller into an **adaptive, self-optimizing system** that automatically compensates for hardware variations, component aging, and environmental changes while maintaining safety authority and control precision.
 
+**🔗 T2-CONTROL-010**: **Core Control Decision Tree**  
+**Derived From**: T1-PHILOSOPHY-001 (3-Tier Priority Hierarchy) + T1-PHILOSOPHY-002 (ECU Cooperation) + T1-PHILOSOPHY-003 (Comfort and Driveability) + T2-ECU-001 (Torque Production Assistant) + T1-SAFETY-001 (Overboost Protection)  
+**Decision Type**: ⚠️ **Engineering Decision** - Fundamental control algorithm implementing torque-centric boost assistance  
+**Engineering Rationale**: Synthesizes all core philosophies into executable control logic that helps ECU achieve torque goals safely and smoothly  
+**AI Traceability**: Drives primary control loop implementation, rate limiting algorithms, and safety override systems
+
+**Primary Control Decision Logic:**
+```
+Actual Torque == Requested Torque?
+├─ YES → Hold current boost assistance level (steady state)
+├─ NO (too low) → Increase boost assistance
+│   ├─ Rate limiting: Applied per torque delta urgency and aggression scaling
+│   ├─ Monitor: Don't exceed target torque (prevent ECU intervention)
+│   └─ Hard limit: Don't exceed max boost PSI (safety ceiling)
+└─ NO (too high) → Reduce boost assistance  
+    ├─ Rate limiting: Applied per transition smoothing algorithms
+    ├─ SAFETY OVERRIDE: If overboost detected → Immediate hard power cut (duty=0%, no rate limiting)
+    └─ Once in vacuum → Close wastegate (air efficiency optimization)
+```
+
+**Safety Override Priority:**
+- **Hard power cuts** - Immediate duty=0% for overboost conditions bypass all comfort considerations
+- **Safety trumps comfort** - Engine protection overrides rate limiting when damage risk exists
+- **Emergency response** - Critical safety situations require immediate action regardless of driveability impact
+
+**Control Philosophy Summary:**
+RumbleDome does not chase boost pressure targets - it **chases torque assistance targets** with boost pressure as the tool, not the objective. The system helps the ECU achieve its torque goals while respecting safety limits and maintaining drivetrain-friendly response characteristics through intelligent rate limiting and transition management.
+
+**🔗 T2-CONTROL-011**: **Rate Limiting and Transition Management**  
+**Derived From**: T1-PHILOSOPHY-003 (Comfort and Driveability) + T1-PHILOSOPHY-001 (3-Tier Priority Hierarchy) + T1-SAFETY-001 (Overboost Protection)  
+**Implements Requirements From**: T2-CONTROL-010 (Core Control Decision Tree)  
+**Decision Type**: ⚠️ **Engineering Decision** - Sophisticated rate limiting preventing drivetrain damage and passenger discomfort  
+**Engineering Rationale**: Raw torque gap responses would cause violent boost changes; intelligent rate limiting provides smooth, context-appropriate transitions  
+**AI Traceability**: Drives boost ramping algorithms, aggression scaling implementation, and comfort optimization systems
+
+**Urgency-Based Rate Scaling:**
+
+**Torque Delta Analysis:**
+- **Large torque gaps** (>100 Nm deficit) → Higher urgency → Faster boost ramp rates
+- **Small torque gaps** (<50 Nm deficit) → Lower urgency → Gentler boost ramp rates  
+- **Torque demand derivative** → Monitor rate of ECU torque request changes for urgency detection
+- **Context sensitivity** → Same torque gap gets different treatment based on how quickly ECU requested it
+
+**Rate Scaling Implementation:**
+```
+let urgency_factor = calculate_urgency(torque_gap, torque_demand_derivative);
+let base_ramp_rate = aggression_setting * BASE_RAMP_RATE;
+let scaled_ramp_rate = base_ramp_rate * urgency_factor;
+
+urgency_factor = match (torque_gap, torque_demand_derivative) {
+    (large_gap, high_derivative) => 2.0,    // Emergency acceleration
+    (large_gap, low_derivative) => 1.2,     // Gradual power request
+    (small_gap, _) => 0.8,                  // Fine adjustment
+    (negative_gap, _) => 0.3                // Backing off power
+}
+```
+
+**Throttle Transition Management:**
+
+**Tip-In Behavior (Throttle Application):**
+- **Gradual tip-in** → Smooth boost build with conservative ramp rates
+- **Aggressive tip-in** → Urgent boost build with higher ramp rates
+- **Detection method** → Monitor ECU torque request acceleration patterns
+- **Comfort integration** → Even urgent requests respect maximum jerk limits to prevent drivetrain shock
+
+**Tip-Out Behavior (Throttle Release):**
+- **Controlled boost decay** → Prevent sudden power loss causing forward pitch
+- **Vacuum transition** → Smooth transition to closed wastegate for air efficiency
+- **Context awareness** → Different decay rates for gentle vs. emergency throttle release
+- **Safety override** → Rapid decay allowed when manifold pressure indicates overboost risk
+
+**Aggression Scaling Integration:**
+
+**Aggression Setting Impact on Rate Limits:**
+- **Conservative (0.3)** → All rate limits reduced, maximum smoothness priority
+- **Moderate (0.6)** → Balanced rate limits, comfort with reasonable responsiveness  
+- **Aggressive (1.0)** → Full rate limit range, performance priority over ultimate smoothness
+
+**Aggression-Scaled Parameters:**
+```
+max_boost_increase_rate = BASE_INCREASE_RATE * aggression * urgency_factor;
+max_boost_decrease_rate = BASE_DECREASE_RATE * aggression * comfort_factor;
+jerk_limit = MAX_JERK / (aggression + 0.5);  // Higher aggression allows more jerk
+transition_smoothing = SMOOTHING_FACTOR * (2.0 - aggression);  // Less smoothing at high aggression
+```
+
+**Safety Override Conditions:**
+
+**Rate Limiting Bypassed When:**
+- **Overboost detected** → Immediate hard power cut regardless of comfort considerations
+- **Critical fault conditions** → Safety takes absolute priority over smooth transitions  
+- **Emergency ECU torque reduction** → Rapid backing off when ECU detects knock, traction loss, etc.
+
+**Rate Limiting Always Applied When:**
+- **Normal operation** → All boost changes filtered through transition management
+- **Learning mode** → Extra conservative rate limits during system learning phases
+- **Cold engine conditions** → Temperature-based rate limit reduction using CAN coolant temperature data
+
+**Cold Engine Rate Limiting (CAN Coolant Temperature-Based):**
+- **Cold engine (<60°C/140°F)** → Extra conservative rate limits, maximum smoothness to protect cold drivetrain components
+- **Warm-up phase (60-80°C/140-176°F)** → Graduated rate limits increasing with temperature
+- **Operating temperature (>80°C/176°F)** → Full rate limiting capability enabled
+- **Temperature monitoring** → Coolant temperature from high-speed CAN bus (no additional sensors required)
+- **User interface indication** → Display coolant temperature and "COLD ENGINE - REDUCED RESPONSE" warning to explain conservative behavior
+
+**Implementation Architecture:**
+
+**Rate Limiting Pipeline:**
+1. **Raw Control Command** → Calculate desired boost change from torque gap
+2. **Urgency Analysis** → Determine appropriate rate scaling based on context  
+3. **Aggression Scaling** → Apply user preference scaling to calculated rate limits
+4. **Transition Smoothing** → Apply jerk limiting and comfort filters
+5. **Safety Validation** → Check for override conditions that bypass rate limiting
+6. **Final Command** → Output rate-limited boost adjustment to pneumatic system
+
+**Transition State Management:**
+- **Current boost level tracking** → Maintain awareness of system state for smooth transitions
+- **Rate limit history** → Track recent rate limiting decisions for consistency
+- **Context preservation** → Remember whether in tip-in, tip-out, or steady-state mode
+- **Safety state awareness** → Different rate limits when operating near safety boundaries
+
+This rate limiting system transforms raw torque-following decisions into smooth, context-appropriate boost delivery that respects both performance requirements and comfort constraints while maintaining absolute safety authority when needed.
+
+## System Input Architecture
+
+**🔗 T2-SYSTEM-001**: **System Input Requirements**  
+**Derived From**: T1-PHILOSOPHY-002 (ECU Cooperation) + T1-SAFETY-001 (Overboost Protection) + T1-PHILOSOPHY-005 (Comprehensive Diagnostics) + T1-PHILOSOPHY-003 (Comfort and Driveability)  
+**Implements Requirements From**: T2-CONTROL-010 + T2-CONTROL-011 + T2-CONTROL-009 + T2-DIAGNOSTICS-002  
+**Decision Type**: ⚠️ **Engineering Decision** - Complete specification of all external inputs required for system operation  
+**Engineering Rationale**: Centralized input requirements ensure complete sensor coverage, proper installation, and robust fault handling  
+**AI Traceability**: Drives hardware design, installation procedures, CAN integration, and input validation systems
+
+**CAN Bus Inputs (High-Speed Network):**
+
+**Primary Control Inputs:**
+- **Desired Torque** (ECU torque request) - Primary control signal for torque-following algorithm
+- **Actual Torque** (ECU torque delivery) - Feedback signal for torque gap analysis  
+- **Engine RPM** - Control context and learning table indexing
+- **Manifold Pressure** - Safety monitoring and boost effectiveness validation
+
+**System Context Inputs:**
+- **Coolant Temperature** - Cold engine rate limiting and thermal protection
+- **Intake Air Temperature** - Environmental compensation (optional, enhances accuracy)
+- **Vehicle Speed** - Context awareness for control refinement (optional)
+
+**CAN Input Validation:**
+- **Message timeout detection** (<100ms for critical signals)
+- **Range validation** (torque 0-800 Nm, RPM 0-8000, etc.)
+- **Consistency checking** (actual torque ≤ desired torque under normal conditions)
+- **Protocol error handling** (malformed messages, bus errors)
+
+**Pneumatic System Inputs (Analog Pressure Sensors):**
+
+**Primary Pneumatic Monitoring:**
+- **Feed Pressure Sensor** - Supply pressure monitoring and regulator health assessment
+- **Upper Dome Pressure Sensor** - Wastegate closing force validation and blown hose detection  
+- **Lower Dome Pressure Sensor** - Wastegate opening force validation and pneumatic system health
+- **Manifold Pressure Sensor** - Boost pressure measurement and overboost protection (redundant with CAN)
+
+**Sensor Specifications:**
+- **Pressure Range**: 0-50 PSI minimum (0-100 PSI preferred for headroom)
+- **Accuracy**: ±1% full scale for control, ±2% acceptable for diagnostics
+- **Response Time**: <50ms for control loop stability
+- **Temperature Range**: -40°C to +125°C automotive operating range
+
+**Pneumatic Input Validation:**
+- **Sensor fault detection** - Open circuit, short circuit, out-of-range readings
+- **Correlation checking** - Cross-validate readings between redundant sensors
+- **Physical consistency** - Dome pressures consistent with solenoid commands
+- **Baseline tracking** - Monitor for sensor drift over time
+
+**Configuration Inputs (User Settings):**
+
+**Primary Configuration Parameters:**
+- **Aggression Setting** (0.0-1.0) - Single-knob control scaling all system responses
+- **Spring Pressure** - Mechanical wastegate spring pressure for control calculations
+- **Maximum Boost Limit** - Hard safety ceiling for boost pressure
+- **Overboost Limit** - Emergency response threshold above max boost
+
+**Advanced Configuration (Optional):**
+- **Rate Limiting Preferences** - Custom urgency scaling factors
+- **Learning Sensitivity** - Auto-learning aggressiveness settings
+- **Temperature Compensation** - Environmental adaptation parameters
+- **Vehicle-Specific Scaling** - Platform-specific torque interpretation factors
+
+**Configuration Input Validation:**
+- **Range enforcement** - All parameters within safe operating bounds
+- **Consistency checking** - Overboost > max boost, spring pressure reasonable for boost targets
+- **Change rate limiting** - Prevent dangerous configuration changes during operation
+- **Backup and restore** - Configuration integrity protection
+
+**System State Inputs (Internal Monitoring):**
+
+**Learning System State:**
+- **Calibration Confidence Levels** - Quality metrics for learned parameters
+- **Learning Convergence Status** - Progress indicators for auto-learning algorithms  
+- **Historical Performance Data** - Trend analysis for predictive maintenance
+- **Fault History** - Previous system faults and recovery information
+
+**Real-Time System Health:**
+- **Control Loop Timing** - Execution frequency validation and jitter monitoring
+- **Memory Usage** - System resource monitoring for stability
+- **SD Card Health** - Storage system integrity for logging and learned data
+- **Communication Status** - CAN bus health and message statistics
+
+**Input Fault Response Matrix:**
+
+**Critical Input Failures (Immediate Safe Mode):**
+- **CAN torque signals lost** → Disable boost control, maintain minimal boost
+- **Feed pressure sensor failure** → Cannot validate pneumatic system safety
+- **Manifold pressure sensor failure** → No overboost protection capability
+
+**Degraded Operation Modes:**
+- **Single dome pressure sensor failure** → Continue with reduced diagnostic capability
+- **Coolant temperature loss** → Use conservative rate limits
+- **Non-critical CAN signals lost** → Reduce features but maintain core functionality
+
+**Sensor Redundancy Strategy:**
+- **Manifold pressure** → CAN signal + dedicated sensor for cross-validation
+- **System health monitoring** → Multiple indicators prevent single-point failures  
+- **Configuration backup** → SD card + internal memory for critical parameters
+
+**Installation and Commissioning Requirements:**
+
+**Pre-Operation Validation:**
+- **All critical sensors responding** within expected ranges
+- **CAN communication established** with required message frequencies
+- **Pneumatic system pressure test** successful (Layer 0 bootstrap)
+- **Configuration parameters validated** and within safe bounds
+
+**Commissioning Checklist:**
+1. **CAN bus integration** - Verify all required signals present and accurate
+2. **Pneumatic sensor calibration** - Zero-point and span validation  
+3. **Pressure system validation** - Feed pressure, dome response, leak testing
+4. **Configuration validation** - All parameters consistent and safe
+5. **System integration test** - End-to-end functionality verification
+
+This comprehensive input specification ensures RumbleDome has complete situational awareness for safe, effective boost control while providing clear installation and validation guidance.
+
 ## Data Architecture
 
 ### Configuration Data
@@ -428,7 +663,8 @@ This auto-learning pneumatic system transforms RumbleDome from a static boost co
 - **Performance Metrics** - system health scores and maintenance predictions
 
 **🔗 T2-DIAGNOSTICS-002**: **Pneumatic Fault Detection Algorithms**  
-**Derived From**: T2-DIAGNOSTICS-001 (Multi-Output Logging) + pneumatic system reliability requirements  
+**Derived From**: T1-SAFETY-001 (Overboost Protection) + T1-PHILOSOPHY-005 (Comprehensive Diagnostics) + T1-PHILOSOPHY-001 (3-Tier Priority Hierarchy)  
+**Implements Requirements From**: T2-DIAGNOSTICS-001 (Multi-Output Logging)  
 **Decision Type**: ⚠️ **Engineering Decision** - Real-time pneumatic system health monitoring  
 **Engineering Rationale**: Early fault detection prevents system damage and enables predictive maintenance  
 **AI Traceability**: Drives fault response protocols, maintenance scheduling, and system reliability metrics

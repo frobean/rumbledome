@@ -754,3 +754,41 @@ Test Protocol:
 3. **Turbo system thermal response** - slowest response, determines overall system settling time
 
 Understanding and properly accounting for pneumatic system dynamics is essential for achieving stable, responsive boost control while avoiding pneumatic system limitations that could cause control instability or excessive air consumption.
+
+## Hard Physics Constraints
+
+### Wastegate Position Sensing Limitations
+
+**Fundamental Hardware Constraint**: Standard automotive wastegates provide **no position feedback**.
+
+**Physical Reality:**
+- **Standard automotive wastegates** - no position sensors (cost, packaging, reliability constraints)
+- **Aftermarket performance wastegates** - also lack position sensing capability
+- **Industrial servo actuators** - have position feedback but cost 10x+ more and unsuitable for automotive environment
+- **Custom position sensing** - impractical due to exhaust heat, vibration, and packaging constraints
+
+**System Design Implications:**
+
+**Control Strategy Constraints:**
+- **Pressure-based control only** - system commands dome pressures, cannot verify actual wastegate position
+- **No mechanical feedback loop** - cannot detect if dome pressure translates to wastegate movement
+- **Manifold pressure validation** - only downstream confirmation of wastegate effectiveness
+- **Conservative tuning required** - control gains must account for unknown mechanical response variations
+
+**Failure Modes Cannot Be Detected:**
+- **Mechanical binding** - wastegate physically stuck but dome pressures appear normal
+- **Linkage failure** - actuator rod disconnected from wastegate valve
+- **Valve seizure** - wastegate valve stuck in exhaust housing
+- **Spring failure** - wastegate spring broken but dome pressures respond normally
+
+**Compensating Design Strategies:**
+- **Manifold pressure monitoring** - use boost pressure response to infer wastegate operation
+- **Conservative pressure commands** - avoid operating regions where position uncertainty is critical
+- **Response time analysis** - detect abnormal boost response patterns that suggest mechanical issues
+- **Multiple validation methods** - combine pneumatic pressure data with manifold pressure trends
+
+**Engineering Acceptance:**
+This constraint is **fundamental to affordable automotive wastegate technology**. The control system design must operate reliably despite having no direct knowledge of wastegate position, relying instead on pneumatic pressure control with downstream manifold pressure validation.
+
+**Design Philosophy Impact:**
+RumbleDome's approach acknowledges this limitation by focusing on **robust pressure-based control** rather than attempting precise position control that would require unavailable feedback sensors.

@@ -214,10 +214,11 @@ class DocumentationAnalyzer:
                     end = min(len(content), position + 200)  # Look after the ID
                     context = content[start:end]
                     
-                    # Heuristic: if it starts with **🔗 or has Decision Type/Derived From nearby, it's a definition
+                    # Heuristic: if it starts with **🔗 or has Decision Type/Derived From/Implements nearby, it's a definition
                     if ("**🔗 " + str(trace_id) in context or 
                         "Decision Type:" in context or 
-                        ("Derived From:" in context and context.find("Derived From:") < context.find(str(trace_id)))):
+                        ("Derived From:" in context and context.find("Derived From:") < context.find(str(trace_id))) or
+                        ("Implements Requirements From:" in context and context.find("Implements Requirements From:") < context.find(str(trace_id)))):
                         definitions.append((filename, position))
                     else:
                         references.append((filename, position))
@@ -240,9 +241,11 @@ class DocumentationAnalyzer:
                     nearby = content[start:end]
                     
                     # Handle both regular and Unicode variations of colons
+                    # Check for derivation and implementation fields
                     if ("Derived From:" in nearby or "Derived From：" in nearby or 
                         "Decision Type:" in nearby or "Decision Type：" in nearby or
-                        "**Derived From**:" in nearby or "**Decision Type**:" in nearby):
+                        "**Derived From**:" in nearby or "**Decision Type**:" in nearby or
+                        "Implements Requirements From:" in nearby or "**Implements Requirements From**:" in nearby):
                         has_derivation = True
                         break
                 

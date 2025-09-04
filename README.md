@@ -51,24 +51,28 @@ RumbleDome is **not a traditional boost controller** - it's a **torque request a
 
 ### 📚 Documentation Reading Order
 
+⚠️ **Complexity Warning:** This is a comprehensive technical specification (~200+ pages). Don't try to read everything at once!
+
 **Essential Foundation (read in order):**
-1. `Context.md` → High-level design context and goals
-2. `Physics.md` → Turbo system physics and control theory fundamentals  
-3. `Requirements.md` → Functional and performance requirements
-4. `Safety.md` → Safety requirements and critical constraints
-5. `AI_Philosophy.md` → Human-AI collaboration methodology and boundaries
+1. `Context.md` → High-level design context and goals *(🟢 Accessible)*
+2. `Physics.md` → Turbo system physics and control theory fundamentals *(🟡 Technical but readable)*
+3. `Requirements.md` → Functional and performance requirements *(🟢 Accessible)*
+4. `Safety.md` → Safety requirements and critical constraints *(🟡 Technical)*
+5. `AI_Philosophy.md` → Human-AI collaboration methodology and boundaries *(🟢 Accessible)*
 
-**Implementation Details:**
-6. `Architecture.md` → System design and component architecture
-7. `Hardware.md` → Hardware abstraction layer and platform specifications
-8. `CAN_Signals.md` → Ford Gen2 Coyote CAN bus signal specifications
-9. `Protocols.md` → JSON/CLI communication protocol specifications
+**Implementation Details:** *(🔴 Advanced - for implementers)*
+6. `Architecture.md` → System design and component architecture *(🔴 Very detailed)*
+7. `Hardware.md` → Hardware abstraction layer and platform specifications *(🔴 Technical)*
+8. `CAN_Signals.md` → Ford Gen2 Coyote CAN bus signal specifications *(🔴 Specialized)*
+9. `Protocols.md` → JSON/CLI communication protocol specifications *(🟡 Technical)*
 
-**Development & Reference:**
-10. `Implementation.md` → Code structure, build process, and development workflow
-11. `TestPlan.md` → Testing strategy and validation procedures
-12. `Definitions.md` → Acronyms, jargon, and domain-specific terminology
-13. `BeyondRumbleDome.md` → Future enhancement concepts  
+**Development & Reference:** *(🔴 Advanced - for developers)*
+10. `Implementation.md` → Code structure, build process, and development workflow *(🔴 Technical)*
+11. `TestPlan.md` → Testing strategy and validation procedures *(🔴 Technical)*
+12. `Definitions.md` → Acronyms, jargon, and domain-specific terminology *(🟢 Reference)*
+13. `BeyondRumbleDome.md` → Future enhancement concepts *(🟡 Conceptual)*
+
+**Legend:** 🟢 Accessible | 🟡 Technical but manageable | 🔴 Advanced/Specialized  
 
 ---
 
@@ -76,20 +80,41 @@ RumbleDome is **not a traditional boost controller** - it's a **torque request a
 
 ## 🚀 Quick Start
 
-**👨‍🔬 For Researchers/Students**: Want to understand the technical approach?  
-→ Read [Context.md](docs/Context.md) and [Physics.md](docs/Physics.md)
+### 🧠 Mental Model: What RumbleDome Actually Does
 
-**👩‍💻 For Developers**: Ready to contribute or build?  
-→ Follow the [documentation reading order](docs/README.md) starting with Context → Physics → Requirements
+**Traditional Boost Controller:** "I want 15 PSI boost at 3000 RPM"
+**RumbleDome:** "I want to help the ECU achieve whatever torque it's requesting"
 
-**🔧 For Users**: Want to build and install?  
-→ Hardware assembly and installation guides coming in Phase 8
+Think of RumbleDome as a **smart assistant** that reads your ECU's mind:
+1. **ECU:** "I want 300 Nm torque" 
+2. **ECU:** "I'm only making 250 Nm torque"
+3. **RumbleDome:** "Let me add some boost to help you get there"
+4. **User Aggression Setting:** "Be gentle/moderate/aggressive about it"
 
-**📊 For Data/Tuning**: Want to understand the protocols?  
-→ See [Protocols.md](docs/Protocols.md) for JSON/CLI interface specification
+The magic is that RumbleDome **never fights your ECU** - it only helps it achieve what it already wants to do.
 
-**🔧 For Systematic Engineering**: Want to use our AI-Traceable Engineering tools?  
-→ See [Quick Start Guide](SYSTEMATIC_ENGINEERING_QUICKSTART.md) or [Full Tool Documentation](docs/SystematicEngineeringTool.md)
+### 📚 Reading Paths (Choose Your Adventure)
+
+**🤔 "I just want to understand the concept"** *(15 minutes)*
+→ [Context.md](docs/Context.md) (sections 1-3) + this README
+
+**⚗️ "I'm curious about the engineering approach"** *(1 hour)*  
+→ [Context.md](docs/Context.md) → [Physics.md](docs/Physics.md) (skip the math-heavy sections)
+
+**🔬 "I want the full technical deep-dive"** *(3+ hours)*
+→ Follow the complete [Documentation Reading Order](#-documentation-reading-order)
+
+**👩‍💻 "I want to contribute code"** *(2 hours + ongoing)*
+→ [Context.md](docs/Context.md) → [Architecture.md](docs/Architecture.md) → [Implementation.md](docs/Implementation.md)
+
+**🔧 "I want to build one"** *(Coming in Phase 8)*
+→ Hardware assembly and installation guides
+
+**📊 "I want to integrate with the data/protocols"**
+→ [Protocols.md](docs/Protocols.md) for JSON/CLI interface specification
+
+**🤖 "I want to use the AI engineering methodology"**
+→ [Quick Start Guide](SYSTEMATIC_ENGINEERING_QUICKSTART.md) or [Full Tool Documentation](docs/SystematicEngineeringTool.md)
 
 ## ✨ Technical Highlights
 
