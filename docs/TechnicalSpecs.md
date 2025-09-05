@@ -102,7 +102,7 @@ Before modifying this document:
 - **Filesystem**: FAT32 for maximum compatibility
 - **File Structure**:
   ```
-  /config/user_config.json         (User configuration - 5 parameters)
+  /config/user_config.json         (User configuration - 6 parameters)
   /learned/calibration_maps.bin     (Duty cycle calibration tables)
   /learned/environmental.json       (Environmental compensation factors)  
   /learned/sensor_fusion.json       (Sensor cross-calibration data)
@@ -115,31 +115,8 @@ Before modifying this document:
 - **Expected Lifespan**: 10+ years with proper write management
 - **Failure Recovery**: System continues with default parameters if SD card fails
 
-### GPIO Pin Assignments (Teensy 4.1)
-```
-Pressure Sensors:
-- Manifold Pressure:      Pin A0  (ADC)
-- Dome Input Pressure:    Pin A1  (ADC) 
-- Upper Dome Pressure:    Pin A2  (ADC)
-- Lower Dome Pressure:    Pin A3  (ADC)
-
-PWM Output:
-- Solenoid Control:       Pin 2   (FlexPWM)
-
-CAN Bus:
-- CAN TX:                 Pin 22  (CAN1_TX)
-- CAN RX:                 Pin 23  (CAN1_RX)
-
-SPI Display:
-- SPI Display CS:         Pin 10  (CS0)
-- SPI Display DC:         Pin 9   (GPIO)
-- SPI Display RST:        Pin 8   (GPIO)
-
-User Controls:
-- Control Knob Adjust:    Pin 4   (GPIO + Interrupt)
-- Scramble Button:        Pin 5   (GPIO + Interrupt)
-- Status LED:             Pin 13  (GPIO)
-```
+### GPIO and Pin Configuration
+See **[Hardware.md](Hardware.md)** for complete GPIO pin assignments and HAL interface specifications.
 
 ---
 

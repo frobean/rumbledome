@@ -37,12 +37,13 @@ This document defines the acronyms, jargon, and domain-specific terminology used
 
 - **Scramble Button** – Momentary override button providing instant 100% aggression regardless of current setting. Returns to normal aggression when released.
 
-- **5-Parameter Configuration** – Simplified user setup requiring only:
+- **6-Parameter Configuration** – Simplified user setup requiring only:
   - `aggression` (0.0-1.0): Torque-following aggressiveness
   - `spring_pressure` (PSI): Wastegate spring pressure
-  - `max_boost_psi` (PSI): Safety ceiling for boost pressure
+  - `max_boost_psi` (PSI): Operational target ceiling for boost pressure
   - `overboost_limit` (PSI): Hard safety fault threshold  
   - `scramble_enabled` (bool): Enable scramble button functionality
+  - `cold_engine_protection` (bool): Enable temperature-based aggression limiting
 
 - **User Responsibility Model** – Design philosophy where users set safety limits and the system provides intelligent guidance, never enforcement beyond overboost protection.
 
@@ -78,7 +79,7 @@ This document defines the acronyms, jargon, and domain-specific terminology used
 
 - **File Structure** – Organized storage layout:
   ```
-  /config/user_config.json      (5-parameter user configuration)
+  /config/user_config.json      (6-parameter user configuration)
   /learned/[category].json       (learned data by category)
   /backups/[timestamp]/          (automatic rolling backups)
   /logs/[date]/                  (diagnostic and safety logs)
@@ -90,9 +91,15 @@ This document defines the acronyms, jargon, and domain-specific terminology used
 
 ## Safety Systems
 
+- **Max Boost Limit (PSI)** – Target operational ceiling for boost pressure during normal operation. System should avoid exceeding this level but brief overshoots are not dangerous to the engine. Part of normal configuration parameters.
+
+- **Overboost Limit (PSI)** – Hard safety ceiling beyond which engine damage may occur. Any pressure above this level triggers immediate emergency response (0% duty cycle). Must be set higher than Max Boost Limit.
+
+- **Safety Margin** – The gap between Max Boost Limit and Overboost Limit, providing protection against dangerous pressure levels while allowing operational flexibility.
+
 - **Overboost vs Max Boost** – Critical distinction:
-  - **Overboost**: Fault condition requiring immediate duty=0% and learning updates
-  - **Max Boost**: Safety ceiling where brief transient spikes are acceptable
+  - **Max Boost**: Operational target limit - avoid exceeding but brief spikes acceptable
+  - **Overboost**: Hard safety fault threshold - immediate emergency response required
 
 - **Defense in Depth** – Multiple independent safety layers:
   - **Electronic**: Software monitoring and response

@@ -146,7 +146,7 @@ struct StorageHealthReport {
 ```
 /RUMBLEDOME/
 ├── config/
-│   └── user_config.json        # Only 5 parameters: aggression, spring_pressure, max_boost_psi, overboost_limit, scramble_enabled
+│   └── user_config.json        # Only 6 parameters: aggression, spring_pressure, max_boost_psi, overboost_limit, scramble_enabled, cold_engine_protection
 ├── learned/
 │   ├── calibration_maps.bin     # Duty cycle calibration tables (RPM × Boost → Duty)
 │   ├── environmental.json       # Temperature/altitude compensation factors
@@ -197,23 +197,24 @@ trait PortableStorage {
     fn get_card_info(&self) -> Result<SdCardInfo, HalError>;
 }
 
-**🔗 T2-HAL-003**: **5-Parameter Configuration Structure**  
+**🔗 T2-HAL-003**: **6-Parameter Configuration Structure**  
 **Decision Type**: 🔗 **Direct Derivation** - Software implementation of single-knob philosophy  
 **Derived From**: T1-UI-001 (Single Parameter Philosophy)  
 **AI Traceability**: Drives configuration data structures, parameter validation, user interface
 
-// Simple 5-parameter configuration structure  
+// Simple 6-parameter configuration structure  
 pub struct UserConfiguration {
     pub aggression: f32,              // 0.0-1.0 - scales all system behavior
     pub spring_pressure: f32,         // PSI - wastegate spring pressure  
     pub max_boost_psi: f32,          // PSI - performance ceiling
     pub overboost_limit: f32,        // PSI - hard safety limit
     pub scramble_enabled: bool,       // Enable scramble button feature
+    pub cold_engine_protection: bool,   // Enable temperature-based aggression limiting
 }
 ```
 
 **Single-Tier SD Card Storage**:
-- **User Configuration**: Simple 5-parameter settings stored in user_config.json
+- **User Configuration**: Simple 6-parameter settings stored in user_config.json
 - **Learned Data**: Hardware-specific calibration maps and environmental factors  
 - **Safety Logs**: Diagnostic and fault history for analysis
 - **Automatic Backups**: Rolling backups for data protection
@@ -325,8 +326,7 @@ Mobile App                    Teensy 4.1 Console
 |------------------|----------------------------------|
 | "Download Config" | `rumbledome backup --output mobile_backup.json` |
 | "Upload New Tune" | `rumbledome restore --backup-file uploaded.json` |
-| "Switch to Sport Mode" | `rumbledome config --profile sport` |
-| "View Storage Health" | `rumbledome diagnostics --eeprom-report` |
+| "Set Aggression Level" | `rumbledome config --aggression 0.7` |
 | "Live Boost Reading" | `rumbledome status --live --format json` |
 
 **Benefits**:
@@ -448,6 +448,32 @@ trait Gpio {
 - **Pull-up/Pull-down**: Configurable internal pull-up/pull-down resistors
 - **Debouncing**: Hardware or software debouncing for switch inputs
 - **Interrupt Support**: Edge-triggered interrupts for responsive button handling
+
+### GPIO Pin Assignments (Teensy 4.1)
+```
+Pressure Sensors:
+- Manifold Pressure:      Pin A0  (ADC)
+- Dome Input Pressure:    Pin A1  (ADC) 
+- Upper Dome Pressure:    Pin A2  (ADC)
+- Lower Dome Pressure:    Pin A3  (ADC)
+
+PWM Output:
+- Solenoid Control:       Pin 2   (FlexPWM)
+
+CAN Bus:
+- CAN TX:                 Pin 22  (CAN1_TX)
+- CAN RX:                 Pin 23  (CAN1_RX)
+
+SPI Display:
+- SPI Display CS:         Pin 10  (CS0)
+- SPI Display DC:         Pin 9   (GPIO)
+- SPI Display RST:        Pin 8   (GPIO)
+
+User Controls:
+- Control Knob Adjust:    Pin 4   (GPIO + Interrupt)
+- Scramble Button:        Pin 5   (GPIO + Interrupt)
+- Status LED:             Pin 13  (GPIO)
+```
 
 ## System Support Interfaces
 

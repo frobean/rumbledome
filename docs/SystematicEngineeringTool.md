@@ -12,13 +12,13 @@
 
 ## 📖 Overview
 
-The RumbleDome CLI (`./tools/cli`) is a comprehensive automation tool that makes following **AI-Traceable Engineering discipline easier than cutting corners**. It transforms systematic engineering from a manual burden into an automated advantage.
+The RumbleDome CLI (`./tools/cli`) is a comprehensive automation tool that validates documentation consistency, traceability, and systematic engineering compliance as defined in **[AI_Collaborative_Engineering.md](AI_Collaborative_Engineering.md)**.
 
-### 🎯 Core Philosophy
+### 🎯 Tool Purpose
 
-**Making Systematic Engineering Easier Than Vibe Coding**
+**Automated Validation and Consistency Checking**
 
-The tool embodies our discovery that AI works best when systematic specifications exist. Instead of fighting this requirement, we've automated the systematic engineering process to make it **faster and easier** than undisciplined development.
+The RumbleDome CLI automates the validation processes defined in **[AI_Collaborative_Engineering.md](AI_Collaborative_Engineering.md)**, making systematic engineering discipline faster and easier to maintain through automation.
 
 ### 🔗 Key Achievements
 
@@ -409,4 +409,4 @@ Developer: "The tool handles that automatically"
 
 ---
 
-*🔗 Referenced by: README.md (AI Working Agreements), AI_Philosophy.md (Tool Implementation Example)*
+*🔗 Referenced by: README.md (development tools), AI_Collaborative_Engineering.md (process automation), AI_Philosophy.md (collaboration tools)*

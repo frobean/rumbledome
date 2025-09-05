@@ -82,49 +82,37 @@ pub struct CalibrationPoint {
 
 ---
 
-### 2. Environmental Compensation Factors 🌡️
+### 2. Supply Pressure Compensation Factors 🔧
 
-**Purpose**: Adapt duty cycle calibration to changing environmental conditions that affect air density and turbo performance.
+**Purpose**: Adapt duty cycle calibration to supply pressure variations that affect pneumatic control authority.
 
 **Why Learning is Necessary**:
-- **Temperature changes**: Hot air reduces turbo efficiency, requires higher duty
-- **Altitude changes**: Lower air density affects boost production
-- **Supply pressure variations**: Dome input pressure affects control authority  
-- **Seasonal changes**: Long-term weather patterns and fuel quality variations
+- **Supply pressure variations**: Changes in dome input pressure affect how much duty cycle is needed for the same boost result
+- **Regulator drift**: Compressed air regulators can drift over time, requiring compensation
+- **System optimization**: Different supply pressures provide different control resolution vs authority trade-offs
 
 **Data Sources**:
 - **Primary**: Dome input pressure sensor (supply pressure monitoring)
-- **Secondary**: Performance deltas (when achieved boost differs from expected)
-- **Future**: CAN temperature signals (engine, intake air, ambient)
-- **Inferred**: Air density from performance characteristics
+- **Secondary**: Performance tracking (when achieved boost differs from expected duty cycle prediction)
 
 **Learning Algorithm**:
 ```
 For each successful boost delivery:
-1. Record baseline environmental conditions during calibration
-2. Compare current environmental conditions to baseline
-3. Calculate performance delta: actual_boost vs expected_boost  
-4. Attribute delta to environmental factors using correlation analysis
-5. Update compensation factors using exponential moving average (1% rate)
-6. Apply bounds limiting: compensation factors limited to ±30%
+1. Record current supply pressure during boost event
+2. Compare current supply pressure to established baseline
+3. Calculate duty cycle delta: commanded_duty vs expected_duty_for_this_pressure
+4. Update supply pressure compensation factor using exponential moving average (1% rate)
+5. Apply bounds limiting: compensation factors limited to ±30%
 ```
 
 **Storage Structure**:
 ```rust
 pub struct EnvironmentalCompensation {
-    temperature_baseline: f32,        // Reference temperature (°C)
-    temperature_factor: f32,          // Duty correction per °C (0.7-1.3)
+    supply_pressure_baseline: f32,    // Reference dome input pressure (PSI)
+    supply_pressure_factor: f32,      // Duty correction for supply pressure changes (0.9-1.1)
     
-    altitude_baseline: f32,           // Reference pressure (kPa)  
-    altitude_factor: f32,             // Duty correction for altitude (0.8-1.2)
-    
-    supply_pressure_baseline: f32,    // Reference dome input (PSI)
-    supply_pressure_factor: f32,      // Correction for supply changes (0.9-1.1)
-    
-    humidity_factor: f32,             // Future: air density compensation (0.95-1.05)
-    
-    learning_confidence: f32,         // How well environmental model is learned
-    sample_count: u32,                // Number of environmental learning events
+    learning_confidence: f32,         // How well supply pressure compensation is learned
+    sample_count: u32,                // Number of supply pressure learning events
     last_updated: Timestamp,          // Staleness tracking
 }
 ```
@@ -336,10 +324,9 @@ Learned Calibration:      19KB  (calibration_maps.bin)
 Environmental Data:        1KB  (environmental.json)
 Sensor Fusion:             1KB  (sensor_fusion.json)
 Safety Parameters:         1KB  (safety_params.json)
-Backups (5 versions):    115KB  (automatic rolling backups)
 Diagnostic Logs:          50KB  (safety events, system health)
 ---------------------------------------------------------
-Total Storage Used:      188KB  (0.18% of 8GB card)
+Total Storage Used:       73KB  (0.07% of 8GB card)
 ```
 
 **Storage Benefits**:
@@ -347,7 +334,6 @@ Total Storage Used:      188KB  (0.18% of 8GB card)
 - **High resolution**: Smoother control and better transient response  
 - **Growth room**: Easy to add more learned parameters in future
 - **User accessibility**: Human-readable config files
-- **Automatic backups**: Multiple versions preserved for safety
 
 ### Persistence Strategy
 

@@ -369,7 +369,7 @@ fn test_learning_bounds_enforcement() {
 
 ### Configuration System Testing
 
-#### 5-Parameter Configuration Model
+#### 6-Parameter Configuration Model
 ```rust
 #[test]
 fn test_complete_configuration_model() {
@@ -379,9 +379,10 @@ fn test_complete_configuration_model() {
         max_boost_psi: 9.0,
         overboost_limit: 15.0,
         scramble_enabled: true,
+        cold_engine_protection: true,
     };
     
-    // All behavior should be derivable from these 5 parameters
+    // All behavior should be derivable from these 6 parameters
     let response_profile = config.get_response_characteristics();
     
     assert!(response_profile.tip_in_sensitivity > 0.0);
@@ -620,6 +621,8 @@ fn test_can_message_update_frequencies() {
 
 ## Hardware-in-Loop (HIL) Testing
 
+**⚠️ Note**: HIL testing requires building a test rig with pneumatic components, pressure sensors, and controlled air supply. Test rig specifications and feasibility validation are TBD.
+
 ### Pneumatic System Validation
 
 ```rust
@@ -712,7 +715,7 @@ fn test_dome_pressure_cross_validation() {
 
 **Usability Requirements**:
 - [ ] Single aggression knob provides intuitive control across full range
-- [ ] System configuration requires <5 parameters total
+- [ ] System configuration requires <6 parameters total
 - [ ] SD card portability enables easy configuration backup/restore
 - [ ] All diagnostic information accessible through CLI interface
 

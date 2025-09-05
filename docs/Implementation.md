@@ -101,7 +101,7 @@ pub enum SystemState {
 
 pub struct RumbleDomeCore<H: HalTrait> {
     state: SystemState,
-    config: SystemConfig,           // 5 parameters total
+    config: SystemConfig,           // 6 parameters total
     learned_data: LearnedData,      // See LearnedData.md
     torque_following: TorqueFollowing,
     safety_monitor: SafetyMonitor,
@@ -112,13 +112,13 @@ pub struct RumbleDomeCore<H: HalTrait> {
 
 ### Configuration Structure (Simplified)
 
-**🔗 T3-BUILD-004**: **5-Parameter Configuration Implementation**  
-**Derived From**: T2-HAL-003 (5-Parameter Configuration Structure) + storage requirements  
+**🔗 T3-BUILD-004**: **6-Parameter Configuration Implementation**  
+**Derived From**: T2-HAL-003 (6-Parameter Configuration Structure) + storage requirements  
 **Decision Type**: 🔗 **Direct Derivation** - Software implementation of single-knob philosophy  
 **AI Traceability**: Drives configuration serialization, parameter validation, UI consistency
 
 ```rust
-// rumbledome-core/src/config.rs - Only 5 user parameters!
+// rumbledome-core/src/config.rs - Only 6 user parameters!
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
     // User-controlled parameters (stored on SD card)

@@ -332,8 +332,19 @@ When serving as staff engineer on this project, AI must:
 
 ---
 
+## 📋 AI Collaborative Engineering Integration
+
+For complete details on our engineering process methodology, see **[AI_Collaborative_Engineering.md](AI_Collaborative_Engineering.md)**.
+
+This AI collaboration philosophy integrates with that process through:
+- **Human architectural authority** ensures engineering decisions require domain expertise
+- **AI implementation consistency** maintains systematic specifications and patterns  
+- **Collaborative validation** combines human judgment with AI systematic verification
+
+---
+
 **The Bottom Line:** We've discovered that AI works best as a highly capable staff engineer that systematically implements architectural vision while consistently requesting clarification for engineering decisions outside its domain expertise. This preserves engineering authority where it matters while providing massive force multiplication for implementation and documentation.
 
 ---
 
-*🔗 Referenced by: README.md (AI Working Agreements), Implementation.md (Development Philosophy), all T2/T3/T4 documents that involve AI-generated implementations*
+*🔗 Referenced by: README.md (AI collaboration methodology), AI_Collaborative_Engineering.md (process integration), Implementation.md (development philosophy), all T2/T3 documents that involve AI-generated implementations*

@@ -145,8 +145,6 @@ All communication with RumbleDome uses JSON messages over Serial/Bluetooth. All 
     "calibration_points": 24,
     "confidence_average": 0.78,
     "environmental_factors": {
-      "temperature_compensation": 1.05,
-      "altitude_compensation": 0.98,
       "supply_pressure_baseline": 14.2
     },
     "last_updated": "2024-08-30T15:30:45Z"

@@ -122,7 +122,7 @@ RumbleDome's safety approach directly implements the established control philoso
 ### SY-12: Learning Reset Capability
 - **Requirement**: Provide command to reset all learned calibration data
 - **Rationale**: Enables recovery from corrupted or dangerous learned parameters
-- **Preservation**: Reset operation preserves user configuration profiles
+- **Preservation**: Reset operation preserves user configuration parameters
 
 ## Development & Validation Safety
 
@@ -164,11 +164,12 @@ RumbleDome's safety approach directly implements the established control philoso
 
 ## Environmental & Operational Safety
 
-### SY-19: Environmental Adaptation Limits
-- **Requirement**: Environmental compensation factors bounded to prevent unsafe adaptation
-- **Temperature Range**: Compensation limited to ±10% for temperature variations
-- **Altitude Compensation**: Limited to ±15% for altitude variations up to 10,000 feet
-- **Supply Pressure**: Compensation tracks input pressure changes but maintains safety margins
+### SY-19: Supply Pressure Safety Monitoring
+- **Requirement**: Feed pressure monitoring with fault detection to ensure pneumatic control authority
+- **Low Pressure Fault**: Feed pressure below `Spring Pressure + Safety Margin` compromises wastegate opening authority for overboost protection
+- **High Pressure Fault**: Excessive feed pressure compresses solenoid control range, reducing precision for proper wastegate control  
+- **Learning Compensation Bounds**: Feed pressure variation compensation must maintain minimum control authority and not exceed maximum pressure ratings
+- **Implementation**: See Architecture.md T2-CONTROL-009 for feed pressure monitoring and fault detection algorithms
 
 ### SY-20: Operational State Safety
 - **Power-On Safety**: System starts in safe state, requires explicit activation
@@ -193,21 +194,16 @@ RumbleDome's safety approach directly implements the established control philoso
 - **CAN Bus Safety**: Verification that CAN communication failures are handled safely
 - **User Interface Safety**: Confirmation that all user interface operations maintain safety
 
-### SY-24: Storage Health & Data Integrity Safety
-- **SD Card Health Monitoring**: Monitor for card errors, corruption, and write failures
+### SY-24: Storage & Data Integrity Safety
 - **Failure Detection**: Detect SD card removal, corruption, or filesystem errors
 - **Data Corruption Detection**: Checksum validation and automatic corruption recovery  
 - **Atomic Writes**: Crash-safe file operations using temporary files and atomic renames
 - **Write Optimization**: Debounced writes and change detection to minimize SD card wear
-- **Safe Degradation**: System must operate safely with default parameters if SD card fails
+- **Critical Dependency**: System requires SD card with valid configuration for operation
 
 **SD Card Storage Safety Requirements**:
 - **SY-24.1**: System detects SD card presence, corruption, and filesystem errors
-- **SY-24.2**: User warnings displayed for SD card errors or impending failures
-- **SY-24.3**: Automatic fallback to safe default parameters if SD card unavailable
+- **SY-24.2**: User warnings displayed for SD card errors  
+- **SY-24.3**: SD card failure triggers fault state requiring user intervention
 - **SY-24.4**: All writes use atomic operations (temp file + rename) to prevent corruption
 - **SY-24.5**: Learning system uses debounced writes to minimize SD card wear
-- **SY-24.6**: System remains safe and functional even with complete SD card failure
-- **SY-24.7**: SD card health status accessible via console/GUI for diagnostics
-- **SY-24.8**: Automatic backup system prevents data loss from card failures
-- **SY-24.9**: Write frequency optimization prevents premature SD card wear

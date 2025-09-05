@@ -119,7 +119,7 @@ The `aggression` setting determines which sibling priority leads:
 
 ### FR-7: User Interface & Monitoring
 - **Real-time Display**: TFT display showing boost gauge, targets, calibration progress, pneumatic health
-- **System Status**: Display current profile, system state, fault conditions, calibration progress
+- **System Status**: Display current aggression level, system state, fault conditions, calibration progress
 - **Configuration Interface**: JSON/CLI protocol for configuration, calibration control, system recommendations
 - **Diagnostic Information**: Provide torque signals, pressure readings, learned duty cycles, system health data
 
@@ -152,7 +152,7 @@ The `aggression` setting determines which sibling priority leads:
 
 ### Phase 1 Scope
 - Fixed torque target strategy (configurable percentage, not adaptive)
-- Manual profile selection (user must select power level explicitly)
+- Manual aggression adjustment (user must set desired power level via single parameter)
 - Ford Gen2 Coyote CAN protocol only
 - Basic environmental compensation
 - Boost pressure configuration only (power output varies by engine setup)
