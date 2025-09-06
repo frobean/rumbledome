@@ -81,6 +81,7 @@ crates/
 6. `docs/Definitions.md` - Domain terminology and Phase 2 concepts
 7. `docs/Hardware.md` - HAL specifications and sensor requirements
 8. `docs/Protocols.md` - JSON/CLI communication protocol
+9. `kicad/RumbleDome_Circuit_Architecture.md` - Circuit blocks, signal flow, and PCB layout guidelines
 
 ## Hardware Context
 
@@ -141,6 +142,37 @@ crates/
 - **Follow safety constraints** - overboost protection and progressive limits are non-negotiable
 - **Mark speculative areas** with `⚠ SPECULATIVE` for human verification
 - **Preserve design philosophy** - boost-based configuration, torque cooperation, ECU integration
+
+## AI Working Agreement - Limitation Disclosure
+
+**When user proposes new ideas or asks "Wouldn't it be cool if...":**
+
+**I will immediately disclose relevant limitations before we start, including:**
+
+**Spatial/Visual Limitations:**
+- Circuit layout, component placement, mechanical design
+- 3D reasoning, coordinate geometry, visual positioning
+- Image generation or complex visual analysis
+
+**Real-time/Hardware Limitations:**
+- Hardware control, sensor interfacing, embedded systems
+- Real-time optimization, control loops
+- Interactive systems requiring immediate response
+
+**External Access Limitations:**
+- Component databases, pricing, availability data
+- CAD tools, simulation software, specialized applications
+- Hardware testing, measurement tools
+
+**Computational Limitations:**
+- Complex optimization algorithms requiring significant compute
+- Large-scale simulations or modeling
+- Machine learning training or heavy numerical processing
+
+**Disclosure Format:**
+"That's an interesting idea! However, this involves [specific limitation], which is one of my weak areas. You should expect [specific issues]. The effort-to-value ratio might be poor compared to [alternative approach]."
+
+**Goal:** Set realistic expectations upfront rather than discovering limitations through frustrating trial-and-error cycles.
 
 ## Build Commands
 
