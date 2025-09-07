@@ -12,6 +12,10 @@ Usage:
     ./cli fix                        # Interactive fix assistant
     ./cli validate                   # Pre-commit validation
     ./cli report                     # Generate architect report
+    ./cli id-check <category>        # Find next available ID in category
+    ./cli id-allocate <category> <title>  # Auto-assign next available ID
+    ./cli id-trace <id>              # Show all references to specific ID
+    ./cli id-validate                # Check IDs with fix suggestions
     ./cli help                       # Show detailed help
 """
 
@@ -95,11 +99,196 @@ def main():
                 report = generate_simple_report(analyzer)
                 print(report)
         
+        elif command == "id-check":
+            if len(sys.argv) > 2:
+                category = sys.argv[2]
+                analyzer = DocumentationAnalyzer()
+                next_id = analyzer.find_next_available_id(category)
+                if next_id:
+                    print(f"🔍 Next available ID: {next_id}")
+                else:
+                    print(f"❌ Category '{category}' not found or invalid")
+            else:
+                print("❌ Usage: ./cli id-check <category>")
+                print("💡 Examples: ./cli id-check T2-CONTROL")
+        
+        elif command == "id-allocate":
+            if len(sys.argv) > 3:
+                category = sys.argv[2]
+                title = " ".join(sys.argv[3:])
+                analyzer = DocumentationAnalyzer()
+                allocated_id = analyzer.allocate_next_id(category, title)
+                if allocated_id:
+                    print(f"✅ Allocated ID: {allocated_id}")
+                    print(f"📝 Title: {title}")
+                    print(f"💡 Add this to your documentation:")
+                    print(f"**🔗 {allocated_id}**: **{title}**")
+                else:
+                    print(f"❌ Failed to allocate ID for category '{category}'")
+            else:
+                print("❌ Usage: ./cli id-allocate <category> <title>")
+                print("💡 Example: ./cli id-allocate T2-CONTROL 'New Control Algorithm'")
+        
+        elif command == "id-trace":
+            if len(sys.argv) > 2:
+                target_id = sys.argv[2]
+                analyzer = DocumentationAnalyzer()
+                references = analyzer.trace_id_references(target_id)
+                if references:
+                    print(f"🔍 Tracing references for {target_id}:")
+                    for ref in references:
+                        print(f"  📄 {ref}")
+                else:
+                    print(f"❌ No references found for '{target_id}'")
+            else:
+                print("❌ Usage: ./cli id-trace <id>")
+                print("💡 Example: ./cli id-trace T2-CONTROL-013")
+        
+        elif command == "id-validate":
+            print("🔍 Validating IDs with fix suggestions...")
+            analyzer = DocumentationAnalyzer()
+            suggestions = analyzer.suggest_id_fixes()
+            if suggestions:
+                print("💡 Suggested fixes:")
+                for suggestion in suggestions:
+                    print(f"  {suggestion}")
+            else:
+                print("✅ All IDs are valid - no fixes needed")
+        
+        elif command == "help":
+            show_detailed_help()
+        
         else:
             print(__doc__)
     else:
         print("🚀 Starting interactive REPL mode...")
         print("💡 Interactive functionality fully available")
+
+def show_detailed_help():
+    """Show comprehensive help for all CLI commands"""
+    help_text = """
+🎯 RumbleDome Engineering Assistant CLI - Detailed Help
+
+## Core Commands
+
+### validate [--blocking]
+Validate all systematic engineering requirements before commits.
+- Default: Shows issues but allows commit
+- --blocking: Exits with error code if issues found (for pre-commit hooks)
+
+Example:
+    ./cli validate                # Check for issues
+    ./cli validate --blocking     # Block commit if issues found
+
+### report [--export filename]
+Generate comprehensive architectural report.
+- Default: Print to console
+- --export: Save to specified file
+
+Examples:
+    ./cli report                  # Show report
+    ./cli report --export status.md
+
+### audit
+Quick consistency check for documentation health.
+
+### fix
+Interactive assistant for resolving systematic engineering issues.
+
+## ID Management Commands
+
+### id-check <category>
+Find the next available traceability ID in a category.
+
+Examples:
+    ./cli id-check T2-CONTROL     # Returns: T2-CONTROL-024
+    ./cli id-check T2-HAL         # Returns: T2-HAL-007
+    ./cli id-check T2-SAFETY      # Returns: T2-SAFETY-003
+
+### id-allocate <category> <title>
+Automatically assign the next available ID and create registry entry.
+
+Examples:
+    ./cli id-allocate T2-CONTROL "Advanced PID Controller"
+    ./cli id-allocate T2-HAL "Sensor Interface Layer"
+
+Returns ready-to-use documentation template:
+    **🔗 T2-CONTROL-024**: **Advanced PID Controller**
+
+### id-trace <id>
+Show all files and contexts that reference a specific traceability ID.
+
+Examples:
+    ./cli id-trace T2-CONTROL-013
+    ./cli id-trace T2-HAL-006
+
+Shows filename:line with surrounding context.
+
+### id-validate
+Check all IDs and provide specific fix suggestions for:
+- Duplicate ID conflicts
+- Missing derivation fields
+- Broken cross-references
+
+## Workflow Integration
+
+### Pre-Commit Usage
+```bash
+./cli validate --blocking        # Required for commits
+./cli id-check T2-CONTROL       # Before creating new IDs
+```
+
+### Development Workflow
+```bash
+# 1. Check next available ID
+./cli id-check T2-CONTROL
+
+# 2. Allocate new ID if needed
+./cli id-allocate T2-CONTROL "New Algorithm"
+
+# 3. Validate before committing
+./cli validate
+
+# 4. Generate status report
+./cli report --export status.md
+```
+
+## Traceability Management
+
+### Categories
+- T2-CONTROL: Control algorithms and systems
+- T2-HAL: Hardware abstraction layer
+- T2-SAFETY: Safety systems and requirements
+- T2-DIAGNOSTICS: Diagnostic and monitoring systems
+
+### Best Practices
+1. Always use `id-check` before manual ID assignment
+2. Use `id-allocate` for automatic registry tracking
+3. Use `id-trace` to understand impact before renumbering
+4. Run `validate` before every commit
+5. Use `id-validate` suggestions for systematic fixes
+
+## Registry Management
+
+The CLI automatically maintains TRACEABILITY_REGISTRY.md with:
+- Allocated IDs and timestamps
+- Allocation history
+- Cross-reference tracking
+
+This prevents duplicate allocations and provides audit trail.
+
+## Integration with Systematic Engineering
+
+The CLI enforces the AI-Traceable Engineering methodology by:
+1. Blocking commits with systematic engineering issues
+2. Preventing duplicate traceability ID conflicts
+3. Ensuring proper derivation chains from requirements
+4. Maintaining comprehensive cross-reference integrity
+5. Providing automated fix suggestions
+
+For more information, see docs/TRACEABILITY_PROCESS.md
+"""
+    print(help_text)
 
 def generate_simple_report(analyzer):
     """Generate a simple report without f-string issues"""
@@ -253,6 +442,124 @@ class DocumentationAnalyzer:
                     issues['missing_derivations'].append(str(trace_id))
         
         return issues
+    
+    def find_next_available_id(self, category_pattern):
+        """Find the next available ID in a category (e.g., 'T2-CONTROL')"""
+        # Extract tier and category from pattern
+        if not category_pattern.startswith('T') or '-' not in category_pattern:
+            return None
+        
+        try:
+            parts = category_pattern.split('-')
+            tier = int(parts[0][1:])  # Remove 'T' and convert to int
+            category = '-'.join(parts[1:])  # Rejoin remaining parts
+        except (ValueError, IndexError):
+            return None
+        
+        # Find all existing IDs in this category
+        existing_numbers = []
+        for trace_id in self.traceability_index.keys():
+            if trace_id.tier == tier and trace_id.category == category:
+                existing_numbers.append(trace_id.number)
+        
+        if not existing_numbers:
+            next_number = 1
+        else:
+            # Find first gap or next sequential number
+            existing_numbers.sort()
+            next_number = 1
+            for num in existing_numbers:
+                if num == next_number:
+                    next_number += 1
+                else:
+                    break
+        
+        return f"T{tier}-{category}-{next_number:03d}"
+    
+    def allocate_next_id(self, category_pattern, title):
+        """Allocate the next available ID and create registry entry"""
+        next_id = self.find_next_available_id(category_pattern)
+        if not next_id:
+            return None
+        
+        # Create/append to allocation registry
+        registry_file = self.docs_dir.parent / "TRACEABILITY_REGISTRY.md"
+        
+        # Create basic registry if it doesn't exist
+        if not registry_file.exists():
+            registry_content = """# Traceability ID Registry
+
+## Auto-Generated Allocations
+
+This file tracks ID allocations made via the CLI tool.
+
+"""
+        else:
+            with open(registry_file, 'r', encoding='utf-8') as f:
+                registry_content = f.read()
+        
+        # Add allocation entry
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        allocation_entry = f"- **{next_id}**: {title} (allocated {timestamp})\n"
+        registry_content += allocation_entry
+        
+        with open(registry_file, 'w', encoding='utf-8') as f:
+            f.write(registry_content)
+        
+        return next_id
+    
+    def trace_id_references(self, target_id):
+        """Find all files and contexts that reference a specific ID"""
+        references = []
+        
+        for filename, content in self.documents.items():
+            lines = content.split('\n')
+            for line_num, line in enumerate(lines, 1):
+                if target_id in line:
+                    # Get some context around the reference
+                    start_line = max(0, line_num - 2)
+                    end_line = min(len(lines), line_num + 1)
+                    context_lines = lines[start_line:end_line]
+                    context = '\n    '.join(context_lines)
+                    references.append(f"{filename}:{line_num}\n    {context}")
+        
+        return references
+    
+    def suggest_id_fixes(self):
+        """Provide suggestions for fixing ID issues"""
+        suggestions = []
+        issues = self.check_consistency()
+        
+        # Suggest fixes for duplicate IDs
+        if issues['duplicate_ids']:
+            suggestions.append("🔧 Duplicate ID fixes:")
+            for duplicate in issues['duplicate_ids']:
+                suggestions.append(f"   - {duplicate}")
+                # Extract ID from duplicate description
+                if ':' in duplicate:
+                    id_part = duplicate.split(':')[0]
+                    # Suggest renumbering
+                    if 'T2-CONTROL' in id_part:
+                        next_available = self.find_next_available_id('T2-CONTROL')
+                        suggestions.append(f"     💡 Consider renumbering to {next_available}")
+                    elif 'T2-HAL' in id_part:
+                        next_available = self.find_next_available_id('T2-HAL')
+                        suggestions.append(f"     💡 Consider renumbering to {next_available}")
+        
+        # Suggest fixes for missing derivations
+        if issues['missing_derivations']:
+            suggestions.append("📋 Missing derivation fixes:")
+            suggestions.append("   Add these fields to the following IDs:")
+            for missing_id in issues['missing_derivations'][:5]:
+                suggestions.append(f"   - {missing_id}: Add 'Derived From:', 'Decision Type:', 'Engineering Rationale:'")
+        
+        # Suggest fixes for broken cross-references
+        if issues['broken_cross_refs']:
+            suggestions.append("🔗 Broken cross-reference fixes:")
+            for broken_ref in issues['broken_cross_refs'][:3]:
+                suggestions.append(f"   - {broken_ref}: Check filename or create missing file")
+        
+        return suggestions
 
 class TraceabilityID:
     """Represents a traceability ID like T2-CONTROL-008"""
