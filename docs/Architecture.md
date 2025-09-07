@@ -182,7 +182,7 @@ fn execute_control_cycle(&mut self, pwm_timing: &PwmTimingInfo) -> Result<(), Co
    - Large torque gap + high aggression → provide strong boost assistance to help ECU
    - Small/no gap → maintain current assistance level
    - Approaching torque ceiling → reduce assistance to prevent ECU intervention  
-4. **Safety Limit Enforcement**: Clamp boost assistance to configured safety ceilings (max_boost_psi, overboost_limit)
+4. **Safety Limit Enforcement**: Clamp boost assistance to configured safety ceilings (T2-CONTROL-022)
 
 **🔗 T2-CONTROL-005**: **Precise Boost Delivery (PID + Learned Calibration)**  
 **Derived From**: FR-3 (Auto-Calibration System) + FR-6 (Learning & Adaptation)  
@@ -417,9 +417,68 @@ if (abs(torque_error) > torque_deadband) {
 1. **Torque-following layer**: Determines target boost from torque error
 2. **Boost precision layer**: PID control to achieve target boost accurately
 
+**🔗 T2-CONTROL-022**: **Safety-Critical Boost Target Clamping**  
+**Derived From**: T1-PHILOSOPHY-001 (Priority 1: Don't Kill My Car) + SY-1 (Hard Overboost Protection)  
+**Decision Type**: 🔗 **Direct Derivation** - Non-negotiable safety boundary enforcement  
+**Engineering Rationale**: PID controller must never receive unsafe boost targets - safety clamping is first line of defense  
+**AI Traceability**: Drives all boost target validation, safety boundary enforcement, fault detection logic
+
+**SAFETY-CRITICAL CONSTRAINT**: Boost targets MUST be clamped before reaching PID controller:
+```rust
+// SAFETY-CRITICAL: This clamping is non-negotiable and has no bypass modes
+fn clamp_boost_target_for_safety(raw_target: f32, config: &SystemConfig) -> Result<f32, SafetyFault> {
+    const MINIMUM_SAFETY_MARGIN_PSI: f32 = 1.5;
+    const ABSOLUTE_SAFETY_CEILING_PSI: f32 = 30.0;
+    
+    // DEFENSIVE PROGRAMMING: Runtime validation of safety limit relationships
+    // Protects against configuration corruption, memory corruption, or logic bugs
+    if config.overboost_limit <= (config.max_boost_psi + MINIMUM_SAFETY_MARGIN_PSI) {
+        return Err(SafetyFault::InsufficientSafetyMargin {
+            max_boost: config.max_boost_psi,
+            overboost_limit: config.overboost_limit,
+            required_margin: MINIMUM_SAFETY_MARGIN_PSI,
+        });
+    }
+    
+    // Independent validation of safety limits (separate from control logic)
+    let max_safe_boost = config.max_boost_psi.min(config.overboost_limit);
+    
+    // Fail-safe: If safety limits are corrupted, use most restrictive fallback
+    if max_safe_boost <= 0.0 || max_safe_boost > ABSOLUTE_SAFETY_CEILING_PSI {
+        return Err(SafetyFault::CorruptedSafetyLimits {
+            computed_limit: max_safe_boost,
+            absolute_ceiling: ABSOLUTE_SAFETY_CEILING_PSI,
+        });
+    }
+    
+    // Clamp to safety boundary (use max_boost_psi, not overboost_limit)
+    let clamped_target = raw_target.clamp(0.0, config.max_boost_psi);
+    
+    // Audit logging: Record when clamping occurs for safety analysis
+    if clamped_target != raw_target {
+        log_safety_event(SafetyEvent::BoostTargetClamped {
+            requested: raw_target,
+            clamped_to: clamped_target,
+            reason: "Safety limit enforcement",
+            safety_margin_psi: config.overboost_limit - config.max_boost_psi,
+        });
+    }
+    
+    Ok(clamped_target)
+}
+```
+
+**Safety Boundary Enforcement Rules**:
+- **No Bypass Modes**: Safety clamping cannot be disabled, overridden, or bypassed under any operating condition
+- **Independent Validation**: Clamping logic operates independently from torque-following and boost calculation logic
+- **Fail-Safe Defaults**: If safety limit validation fails, system defaults to most restrictive safe limits
+- **Audit Trail**: All clamping events logged with full context for safety analysis
+- **Fault Detection**: Corrupted safety limits trigger immediate fault condition and failsafe response
+
 **PID Control Mathematics:**
 ```
-boost_error = target_boost - actual_boost
+// SAFETY: target_boost is pre-clamped and guaranteed safe
+boost_error = target_boost - actual_boost  
 proportional = Kp * boost_error
 integral += Ki * boost_error * dt
 derivative = Kd * (boost_error - previous_error) / dt
@@ -427,6 +486,129 @@ derivative = Kd * (boost_error - previous_error) / dt
 pid_output = proportional + integral + derivative
 wastegate_duty_change = pid_output * aggression_scaling
 ```
+
+**Safety-Critical PID Constraints**:
+- **Pre-Clamped Inputs**: PID controller receives only safety-validated boost targets (T2-CONTROL-022)
+- **Integral Windup Prevention**: Conditional integration prevents windup during actuator saturation
+- **Output Saturation Handling**: PID output must be bounded and validated before actuator commands
+- **Fault State Management**: PID state (especially integral) must reset appropriately during safety interventions
+
+**🔗 T2-CONTROL-014**: **Integral Windup Prevention Implementation**  
+**Derived From**: PID control requirements + actuator saturation constraints  
+**Decision Type**: ⚠️ **Engineering Decision** - Simple conditional integration approach  
+**Engineering Rationale**: Prevents integral term accumulation when output saturated, avoiding overshoot on desaturation  
+**AI Traceability**: Drives PID implementation, actuator limit handling, control stability algorithms
+
+**Conditional Integration Strategy**:
+```rust
+// Calculate PID terms
+let proportional = Kp * boost_error;
+let derivative = Kd * (boost_error - previous_error) / dt;
+let raw_pid_output = proportional + integral + derivative;
+
+// Check for actuator saturation
+let saturated_output = raw_pid_output.clamp(0.0, 100.0);
+let is_saturated = (raw_pid_output != saturated_output);
+
+// Only integrate when not saturated
+if !is_saturated {
+    integral += Ki * boost_error * dt;
+    // Optional: clamp integral to reasonable bounds
+    integral = integral.clamp(-INTEGRAL_MAX, INTEGRAL_MAX);
+}
+
+final_pid_output = saturated_output;
+```
+
+**Saturation Scenarios**:
+- **0% Duty Saturation**: Wastegate spring pressure limit reached, cannot reduce boost further
+- **100% Duty Saturation**: Maximum turbo boost capacity reached, cannot increase boost further
+- **Temporary Safety Overrides**: System forces 0% duty due to fault, but boost target remains valid
+
+**Anti-Windup Benefits**:
+- **Prevents overshoot** when desaturating from 0% or 100% duty limits
+- **Maintains stability** during temporary safety interventions
+- **Simple implementation** suitable for embedded real-time constraints
+- **Predictable behavior** without complex back-calculation or tuning parameters
+
+**🔗 T2-CONTROL-015**: **Derivative Filtering Implementation**  
+**Derived From**: PID control requirements + noisy sensor constraints  
+**Decision Type**: ⚠️ **Engineering Decision** - Simple low-pass filtering approach  
+**Engineering Rationale**: Raw derivative on noisy pressure sensors causes oscillation; filtering required for stability  
+**AI Traceability**: Drives PID implementation, sensor noise handling, control stability algorithms
+
+**Low-Pass Derivative Filtering**:
+```rust
+// Calculate raw derivative
+let raw_derivative = (boost_error - previous_error) / dt;
+
+// Apply simple low-pass filter to derivative term
+const DERIVATIVE_FILTER_ALPHA: f32 = 0.1; // Tunable: 0.05-0.2 typical range
+filtered_derivative = DERIVATIVE_FILTER_ALPHA * raw_derivative + 
+                     (1.0 - DERIVATIVE_FILTER_ALPHA) * previous_filtered_derivative;
+
+// Use filtered derivative in PID calculation
+let derivative = Kd * filtered_derivative;
+```
+
+**Filter Characteristics**:
+- **Alpha = 0.1**: Moderate filtering, good balance of noise reduction vs responsiveness
+- **Alpha → 0**: More filtering, slower response, better noise rejection
+- **Alpha → 1**: Less filtering, faster response, more sensitive to noise
+- **Tuning guidance**: Start with 0.1, reduce if oscillation persists, increase if response is too sluggish
+
+**Benefits**:
+- **Noise rejection** from pressure sensor quantization and electromagnetic interference
+- **Oscillation prevention** during rapid boost changes
+- **Computational efficiency** suitable for 100Hz control loop
+- **Predictable behavior** without complex filter design or tuning
+
+**🔗 T2-CONTROL-016**: **PID State Management During Safety Interventions**  
+**Derived From**: Safety intervention requirements + control stability constraints  
+**Decision Type**: ⚠️ **Engineering Decision** - Reset integral state for predictable recovery  
+**Engineering Rationale**: Clean restart prevents overshoot from stale integral state after safety events  
+**AI Traceability**: Drives safety intervention logic, PID state handling, fault recovery algorithms
+
+**Integral State Reset Strategy**:
+```rust
+pub struct PidState {
+    integral: f32,
+    previous_error: f32,
+    previous_filtered_derivative: f32,
+    last_update_time: u32,
+}
+
+impl PidState {
+    pub fn reset_on_safety_intervention(&mut self) {
+        // Reset integral to prevent overshoot on recovery
+        self.integral = 0.0;
+        
+        // Reset derivative filter to prevent transient spikes
+        self.previous_filtered_derivative = 0.0;
+        
+        // Preserve error for smooth restart (don't reset previous_error)
+        // This allows proportional term to work immediately
+    }
+    
+    pub fn reset_on_mode_transition(&mut self) {
+        // Gentler reset for normal mode changes
+        self.integral *= 0.5; // Partial reset instead of full
+        self.previous_filtered_derivative = 0.0;
+    }
+}
+```
+
+**Reset Triggers**:
+- **Overboost protection**: Full integral reset when safety intervention forces duty=0%
+- **Fault conditions**: Full reset on CAN timeouts, sensor faults, hardware failures
+- **System state changes**: Full reset when transitioning to/from fault states
+- **Mode transitions**: Partial reset when switching between tip-in/steady-state/tip-out
+
+**Recovery Benefits**:
+- **Predictable restart** without overshoot from stale integral accumulation
+- **Safety-first approach** prioritizes stable recovery over performance continuity
+- **Simple implementation** suitable for embedded real-time constraints
+- **Clean separation** between normal operation and safety intervention states
 
 **Learned Parameter Integration:**
 - **Kp, Ki, Kd gains**: Auto-tuned based on system response characteristics
@@ -467,7 +649,7 @@ every_control_cycle() {
 
 ---
 
-**🔗 T2-CONTROL-014**: **Control Mode Transition Management**  
+**🔗 T2-CONTROL-017**: **Control Mode Transition Management**  
 **Decision Type**: ⚠️ **Engineering Decision** - Smooth coordination between tip-in, steady-state, and tip-out control modes  
 **Derived From**: T1-PHILOSOPHY-003 (Comfort and Driveability), T1-PHILOSOPHY-002 (ECU Cooperation)  
 **Implements Requirements From**: T2-CONTROL-010 (Core Control Decision Tree), T2-CONTROL-013 (Steady-State Control)
@@ -674,7 +856,7 @@ if (torque_demand_increase > tip_in_threshold) {
 **🔗 T2-TESTING-001**: **Control Algorithm Test Harness**  
 **Decision Type**: ⚠️ **Engineering Decision** - Comprehensive simulation environment for safe algorithm development and validation  
 **Derived From**: T1-AI-001 (AI as Implementation Partner), T1-PHILOSOPHY-003 (Auto-Learning and Self-Calibration)  
-**Implements Requirements From**: T2-CONTROL-010 through T2-CONTROL-014 (all control algorithms need validation)
+**Implements Requirements From**: T2-CONTROL-010 through T2-CONTROL-018 (all control algorithms need validation)
 
 ### Test Harness Architecture
 
@@ -787,7 +969,7 @@ This test harness enables **safe, rapid development** of control algorithms with
 
 ---
 
-**🔗 T2-CONTROL-015**: **Safety Override Control System**  
+**🔗 T2-CONTROL-018**: **Safety Override Control System**  
 **Decision Type**: ⚠️ **Engineering Decision** - Emergency control system with absolute priority over all other control modes  
 **Derived From**: T1-SAFETY-001 (Overboost Protection), T1-SAFETY-002 (System Integrity Monitoring), T1-SAFETY-003 (Fail-Safe Design Philosophy)  
 **Implements Requirements From**: All T2-CONTROL specifications (safety overrides all normal control operation)
@@ -1010,10 +1192,10 @@ This safety override system ensures **absolute opening authority** is maintained
 
 ---
 
-**🔗 T2-CONTROL-016**: **Learning Integration and Parameter Adaptation**  
+**🔗 T2-CONTROL-019**: **Learning Integration and Parameter Adaptation**  
 **Decision Type**: ⚠️ **Engineering Decision** - Mathematical framework for auto-learning system integration with all control modes  
 **Derived From**: T1-PHILOSOPHY-003 (Auto-Learning and Self-Calibration), T1-AI-001 (AI as Implementation Partner)  
-**Implements Requirements From**: T2-CONTROL-010 through T2-CONTROL-015 (learning adapts all control algorithms)
+**Implements Requirements From**: T2-CONTROL-010 through T2-CONTROL-018 (learning adapts all control algorithms)
 
 ### Learning Architecture Overview
 
@@ -1232,10 +1414,10 @@ This learning integration system provides **gradual parameter adaptation** using
 
 ---
 
-**🔗 T2-CONTROL-017**: **Fault Handling and System Recovery**  
+**🔗 T2-CONTROL-020**: **Fault Handling and System Recovery**  
 **Decision Type**: ⚠️ **Engineering Decision** - Comprehensive fault detection and graceful degradation strategies  
 **Derived From**: T1-SAFETY-003 (Fail-Safe Design Philosophy), T1-SAFETY-002 (System Integrity Monitoring)  
-**Implements Requirements From**: T2-CONTROL-015 (Safety Override System), all control specifications (fault handling affects all modes)
+**Implements Requirements From**: T2-CONTROL-018 (Safety Override System), all control specifications (fault handling affects all modes)
 
 ### Fault Classification and Response Hierarchy
 
@@ -1505,7 +1687,7 @@ This fault handling system **learns sensor calibration automatically**, provides
 
 ---
 
-**🔗 T2-CONTROL-018**: **Final Control Loop Integration Audit**  
+**🔗 T2-CONTROL-021**: **Final Control Loop Integration Audit**  
 **Decision Type**: ⚠️ **Engineering Decision** - Comprehensive integration verification and completeness audit  
 **Derived From**: All T1 philosophies and T2 control specifications  
 **Implements Requirements From**: System-wide integration validation and traceability verification
@@ -1515,39 +1697,39 @@ This fault handling system **learns sensor calibration automatically**, provides
 **Mode Priority and Interaction Verification:**
 ```
 Control Priority Hierarchy (Verified):
-1. Safety Override (T2-CONTROL-015)     → Absolute priority, interrupts all modes
-2. Fault Handling (T2-CONTROL-017)     → Critical/Major faults override normal operation  
-3. Tip-Out (T2-CONTROL-014)           → Higher priority than tip-in (anti-lag time-critical)
-4. Tip-In (T2-CONTROL-014)            → Overrides steady-state during lag compensation
+1. Safety Override (T2-CONTROL-018)     → Absolute priority, interrupts all modes
+2. Fault Handling (T2-CONTROL-020)     → Critical/Major faults override normal operation  
+3. Tip-Out (T2-CONTROL-017)           → Higher priority than tip-in (anti-lag time-critical)
+4. Tip-In (T2-CONTROL-017)            → Overrides steady-state during lag compensation
 5. Steady-State (T2-CONTROL-013)      → Default mode, background operation
-6. Learning (T2-CONTROL-016)          → Background adaptation, no control override
+6. Learning (T2-CONTROL-019)          → Background adaptation, no control override
 ```
 
 **Mode Integration Validation:**
 
 **✅ Safety Override Integration:**
-- **T2-CONTROL-015** properly overrides all other modes without negotiation
+- **T2-CONTROL-018** properly overrides all other modes without negotiation
 - Emergency dump (0% duty) correctly implemented across all failure scenarios
 - Lower dome safety authority validation prevents dangerous conditions
 - All control modes respect safety bounds and emergency stops
 
 **✅ Fault Handling Integration:**
-- **T2-CONTROL-017** sensor calibration learning integrates with T2-CONTROL-016 parameter adaptation
+- **T2-CONTROL-017** sensor calibration learning integrates with T2-CONTROL-019 parameter adaptation
 - Learnable sensor blending (CAN MAP + boost gauge) provides seamless pressure measurement
 - Fault recovery states properly transition back to normal control modes
 - Degraded operation modes maintain safety while providing reduced functionality
 
 **✅ Tip-In/Tip-Out Integration:**
-- **T2-CONTROL-014** transition management prevents mode conflicts
+- **T2-CONTROL-017** transition management prevents mode conflicts
 - Tip-in properly hands off to steady-state control after turbo lag compensation
 - Tip-out anti-lag uses existing close bias system (upper dome pressurization) 
 - Mode detection hysteresis prevents oscillation between tip-in and tip-out
 
 **✅ Steady-State Control Integration:**
-- **T2-CONTROL-013** torque-to-boost scaling uses learned parameters from T2-CONTROL-016
+- **T2-CONTROL-013** torque-to-boost scaling uses learned parameters from T2-CONTROL-019
 - PID control gains adapt based on operating conditions and system learning
 - Dual-layer control (torque-following + boost precision) provides stable operation
-- Cold engine protection (T2-CONTROL-016) temporarily limits aggression without permanent changes
+- Cold engine protection (T2-CONTROL-019) temporarily limits aggression without permanent changes
 
 ### Data Flow Integration Audit
 
@@ -1574,7 +1756,7 @@ Boost Response → Manifold Pressure → Torque Delivery → Learning Feedback �
 
 **6-Parameter System Verification:**
 1. **Aggression (0.0-1.0)** → Scales all control modes uniformly ✅
-2. **Max Boost Limit (PSI)** → Hard safety ceiling in T2-CONTROL-015 ✅  
+2. **Max Boost Limit (PSI)** → Hard safety ceiling in T2-CONTROL-018 ✅  
 3. **Feed Pressure (PSI)** → Used in safety authority calculations and learning compensation ✅
 4. **Spring Pressure (PSI)** → Force balance calculations across all pneumatic control ✅
 5. **Profile Selection** → Preset combinations properly override individual parameters ✅
@@ -1591,21 +1773,21 @@ Boost Response → Manifold Pressure → Torque Delivery → Learning Feedback �
 **Learning Parameter Coverage:**
 ```
 Hardware Response (Layer 1):
-- Solenoid response curves → T2-CONTROL-017 fault detection ✅
+- Solenoid response curves → T2-CONTROL-020 fault detection ✅
 - Dome volume estimates → All pneumatic calculations ✅  
-- Sensor calibration offsets → T2-CONTROL-017 blending ✅
+- Sensor calibration offsets → T2-CONTROL-020 blending ✅
 - Feed pressure compensation → All control modes ✅
 
 Control Parameters (Layer 2):
 - Torque-to-boost scaling → T2-CONTROL-013 steady-state ✅
 - PID gains (Kp, Ki, Kd) → All control modes ✅
-- Tip-in urgency thresholds → T2-CONTROL-014 transitions ✅
-- Tip-out timing parameters → T2-CONTROL-014 anti-lag ✅
+- Tip-in urgency thresholds → T2-CONTROL-017 transitions ✅
+- Tip-out timing parameters → T2-CONTROL-017 anti-lag ✅
 
 Behavioral Patterns (Layer 3):
 - Operating point indexing → All learned parameter lookup ✅
 - Confidence weighting → Parameter application safety ✅
-- Cold engine compensation → T2-CONTROL-016 aggression limiting ✅
+- Cold engine compensation → T2-CONTROL-019 aggression limiting ✅
 ```
 
 **Learning Safety Integration:**
@@ -1620,7 +1802,7 @@ Behavioral Patterns (Layer 3):
 ```
 Feed Pressure → Lower Dome Authority → Wastegate Opening Force ✅
 Spring Pressure + Upper Dome → Wastegate Closing Force ✅
-Force Balance Monitoring → T2-CONTROL-015 Safety Overrides ✅
+Force Balance Monitoring → T2-CONTROL-018 Safety Overrides ✅
 Emergency Dump (0% Duty) → Maximum Opening Authority ✅
 ```
 
@@ -1636,10 +1818,10 @@ Emergency Dump (0% Duty) → Maximum Opening Authority ✅
 ```
 T1-PHILOSOPHY-001 (Single-Knob) → 6-parameter config with aggression scaling ✅
 T1-PHILOSOPHY-002 (ECU Cooperation) → Torque-following architecture ✅
-T1-PHILOSOPHY-003 (Auto-Learning) → T2-CONTROL-016 learning integration ✅
+T1-PHILOSOPHY-003 (Auto-Learning) → T2-CONTROL-019 learning integration ✅
 T1-PHILOSOPHY-004 (Comfort/Driveability) → Rate limiting and transition management ✅
-T1-PHILOSOPHY-005 (Diagnostics) → T2-CONTROL-017 fault handling ✅
-T1-SAFETY-001 (Overboost Protection) → T2-CONTROL-015 safety overrides ✅
+T1-PHILOSOPHY-005 (Diagnostics) → T2-CONTROL-020 fault handling ✅
+T1-SAFETY-001 (Overboost Protection) → T2-CONTROL-018 safety overrides ✅
 T1-SAFETY-002 (System Integrity) → Sensor monitoring and fault detection ✅
 T1-SAFETY-003 (Fail-Safe Design) → Default safe states and emergency protocols ✅
 ```
