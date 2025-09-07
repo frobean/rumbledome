@@ -82,11 +82,12 @@ impl SystemConfig {
             ));
         }
         
-        // Validate overboost limit
-        if self.overboost_limit <= self.max_boost_psi {
+        // Validate overboost limit with safety margin
+        const MINIMUM_SAFETY_MARGIN_PSI: f32 = 1.5;
+        if self.overboost_limit <= (self.max_boost_psi + MINIMUM_SAFETY_MARGIN_PSI) {
             return Err(CoreError::ConfigurationError(
-                format!("Overboost limit ({} PSI) must be > max boost ({} PSI)", 
-                    self.overboost_limit, self.max_boost_psi)
+                format!("Overboost limit ({} PSI) must be at least {} PSI above max boost ({} PSI)", 
+                    self.overboost_limit, MINIMUM_SAFETY_MARGIN_PSI, self.max_boost_psi)
             ));
         }
         

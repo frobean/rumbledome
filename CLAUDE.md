@@ -135,6 +135,8 @@ crates/
 
 ## AI Collaboration Rules
 
+- **ALWAYS READ EXISTING DOCUMENTATION FIRST** - Check docs/ directory before proposing solutions or redeveloping concepts
+- **Reference existing specifications** - Use Grep/Read tools to find relevant documentation before creating new designs  
 - **Never drop requirements** from specification documents
 - **Surface gaps** rather than guessing when requirements are unclear
 - **Respect layering** - hardware-specific code only in HAL implementations
@@ -142,6 +144,15 @@ crates/
 - **Follow safety constraints** - overboost protection and progressive limits are non-negotiable
 - **Mark speculative areas** with `⚠ SPECULATIVE` for human verification
 - **Preserve design philosophy** - boost-based configuration, torque cooperation, ECU integration
+
+## Documentation-First Workflow
+
+**MANDATORY: Before proposing any technical solution:**
+1. **Search existing docs** using Grep/Read tools for relevant concepts
+2. **Reference existing specifications** rather than re-deriving from first principles  
+3. **Build upon documented decisions** rather than starting from scratch
+4. **Cross-reference related sections** to ensure consistency with existing design
+5. **Only create new specifications** when genuinely needed, not already documented
 
 ## AI Working Agreement - Limitation Disclosure
 

@@ -1,0 +1,153 @@
+{
+  "project_name": "RumbleDome",
+  "project_description": "Torque-based electronic boost controller with ECU cooperation",
+  "traceability_schema": {
+    "tiers": ["T1", "T2", "T4"],
+    "categories": ["CONTROL", "HAL", "SAFETY", "PWM", "TIMING", "SENSOR", "DISPLAY"],
+    "id_format": "{tier}-{category}-{number:03d}"
+  },
+  "code_generators": {
+    "control-loop": {
+      "template": "rumbledome_control_system",
+      "traceability_ids": ["T2-CONTROL-013", "T2-CONTROL-022"],
+      "target_struct": "ControlLoop",
+      "description": "3-level control hierarchy with torque-following",
+      "dependencies": ["PidController", "SafetySystem", "TorqueTracker"],
+      "safety_critical": true
+    },
+    "safety-system": {
+      "template": "rumbledome_safety_system", 
+      "traceability_ids": ["T1-SAFETY-001", "T2-CONTROL-022"],
+      "target_struct": "SafetySystem",
+      "description": "Emergency shutdown and overboost protection",
+      "safety_critical": true,
+      "failsafe_behavior": "0% duty cycle = wastegate open"
+    },
+    "pwm-control": {
+      "template": "rumbledome_pwm_control",
+      "traceability_ids": ["T4-HAL-006", "T2-PWM-001", "T2-HAL-004"],
+      "target_struct": "TeensyPwmControl",
+      "trait_impl": "crate::pwm::PwmControl",
+      "description": "4-port MAC solenoid PWM control at 30Hz",
+      "hardware": "Teensy 4.1 FlexPWM",
+      "safety_requirements": ["T1-SAFETY-001"],
+      "constants": {
+        "frequency": "crate::pwm::constants::PWM_FREQUENCY_HZ",
+        "failsafe_duty": "crate::pwm::constants::FAILSAFE_DUTY",
+        "min_freq": "crate::pwm::constants::MIN_FREQUENCY_HZ",
+        "max_freq": "crate::pwm::constants::MAX_FREQUENCY_HZ"
+      }
+    },
+    "time-provider": {
+      "template": "rumbledome_time_provider", 
+      "traceability_ids": ["T4-HAL-012", "T2-CONTROL-002", "T2-TIMING-001"],
+      "target_struct": "TeensyTimeProvider",
+      "trait_impl": "crate::time::TimeProvider",
+      "description": "Microsecond timing for control loop synchronization",
+      "hardware": "ARM SysTick at 600MHz",
+      "features": ["pwm_synchronization", "delta_timing"]
+    },
+    "pressure-sensors": {
+      "template": "rumbledome_pressure_sensors",
+      "traceability_ids": ["T4-HAL-015", "T2-SENSOR-001"],
+      "target_struct": "TeensyPressureSensors", 
+      "trait_impl": "crate::sensors::PressureSensorProvider",
+      "description": "4x 0-30 PSI pressure sensors with voltage dividers",
+      "hardware": "Teensy 4.1 ADC with 2kΩ+1kΩ voltage dividers",
+      "sensors": ["manifold_pressure", "dome_input", "upper_dome", "lower_dome"],
+      "specs": {
+        "range_psi": 30,
+        "resolution_psi": 0.007,
+        "voltage_range": "0.167V - 1.5V"
+      }
+    },
+    "display-hal": {
+      "template": "rumbledome_display_hal",
+      "traceability_ids": ["T4-HAL-016", "T2-DISPLAY-001"],
+      "target_struct": "TeensyDisplayHal",
+      "trait_impl": "crate::display::DisplayProvider", 
+      "description": "ST7735R TFT LCD control for 1.8\" 128x160 display",
+      "hardware": "ST7735R over SPI",
+      "features": ["graphics", "text", "gauge_rendering"]
+    }
+  },
+  "templates": {
+    "rumbledome_control_system": {
+      "base": "control_system",
+      "customizations": {
+        "includes_pid": true,
+        "includes_safety": true,
+        "control_frequency": "100Hz",
+        "torque_following": true
+      }
+    },
+    "rumbledome_safety_system": {
+      "base": "safety_system", 
+      "customizations": {
+        "overboost_protection": true,
+        "emergency_shutdown": true,
+        "fault_logging": true
+      }
+    },
+    "rumbledome_pwm_control": {
+      "base": "hal_implementation",
+      "customizations": {
+        "pwm_specialized": true,
+        "timing_synchronization": true,
+        "frequency_validation": true,
+        "teensy_hardware": true
+      }
+    },
+    "rumbledome_time_provider": {
+      "base": "hal_implementation",
+      "customizations": {
+        "microsecond_precision": true,
+        "pwm_coordination": true,
+        "delta_timing": true
+      }
+    },
+    "rumbledome_pressure_sensors": {
+      "base": "hal_implementation", 
+      "customizations": {
+        "multi_sensor": true,
+        "voltage_divider_scaling": true,
+        "calibration_support": true
+      }
+    },
+    "rumbledome_display_hal": {
+      "base": "hal_implementation",
+      "customizations": {
+        "spi_interface": true,
+        "graphics_primitives": true,
+        "gauge_widgets": true
+      }
+    }
+  },
+  "validation_rules": {
+    "required_derivation_fields": ["Derived From", "Decision Type", "Engineering Rationale", "AI Traceability"],
+    "cross_reference_targets": ["Context.md", "Safety.md", "TechnicalSpecs.md", "Hardware.md", "Architecture.md"],
+    "safety_critical_patterns": ["0% duty", "failsafe", "emergency", "overboost", "wastegate"],
+    "blocking_validation": ["duplicate_ids", "missing_safety_traceability"],
+    "health_score_weights": {
+      "duplicate_ids": -10,
+      "missing_derivations": -3,
+      "broken_references": -5,
+      "safety_violations": -15
+    }
+  },
+  "documentation_structure": {
+    "docs_directory": "docs",
+    "key_files": {
+      "tier1": ["Context.md", "Requirements.md", "Safety.md"],
+      "tier2": ["TechnicalSpecs.md", "Architecture.md", "Hardware.md"],
+      "tier3": ["Implementation.md", "TestPlan.md"]
+    },
+    "generated_files": ["comprehensive_audit.md", "TRACEABILITY_REGISTRY.md"]
+  },
+  "build_integration": {
+    "pre_commit_validation": true,
+    "cargo_check_targets": ["thumbv7em-none-eabihf"],
+    "test_commands": ["cargo test --workspace"],
+    "lint_commands": ["cargo clippy --workspace"]
+  }
+}

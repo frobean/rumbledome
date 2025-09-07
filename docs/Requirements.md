@@ -82,6 +82,39 @@ The `aggression` setting determines which sibling priority leads:
 - **Live Adjustment**: Safe aggression adjustment during operation via rotary encoder
 - **Aggression Persistence**: Debounced NVRAM storage - aggression changes persist only after 5-10 seconds of stability to prevent wear during adjustment sessions
 
+### Safety Margin Configuration Philosophy
+
+**🔗 T2-CONFIG-006**: **User-Configurable Safety Margins with Dual Learning Architecture**  
+**Derived From**: T1-PHILOSOPHY-001 (Priority 1: Don't Kill My Car) + realistic embedded system constraints  
+**Decision Type**: ⚠️ **Engineering Decision** - User responsibility with simple system support  
+**Engineering Rationale**: Users set risk tolerance; system learns safe operation within bounds using simple, reliable algorithms  
+**AI Traceability**: Drives approach curve learning, conservative exploration, simple overboost response
+
+**Core Principle**: System learns to predictably undershoot overboost limits through safe exploration, with simple overboost response.
+
+**User Responsibility**: Set boost limits (`max_boost_psi`, `overboost_limit`) based on engine capability and risk tolerance  
+**System Responsibility**: Learn boost approach curves that reliably stay within user-configured bounds
+
+**Dual Learning Architecture**:
+
+**Primary Learning Path: Conservative Exploration**
+- Learn safe approach curves by observing successful approaches within `max_boost_psi`
+- Start extremely conservative, gradually optimize through safe undershoot analysis
+- Rate-of-rise limiting based on distance from boost ceiling
+- Example: "Approached 18 PSI target, peaked at 17.8 PSI → can be slightly more aggressive"
+
+**Emergency Learning Path: Simple Overboost Response**  
+- Learn from overboost events with immediate conservative adjustment
+- Immediate safety response (duty cycle = 0%) + event logging
+- Make approach curves more conservative across all conditions
+- Simple rule: "That approach rate caused overboost → use slower rates everywhere"
+- No complex pattern analysis or multi-variable correlation
+
+**Relearning Triggers**: 
+- User changes boost limits → reset to conservative baseline
+- Overboost event → immediate global conservative adjustment
+- User-initiated reset → return to conservative defaults
+
 ### FR-3: Auto-Calibration System
 - **Progressive Learning**: System learns duty cycle mappings for boost targets through safe, progressive calibration runs
 - **Safety Progression**: Start calibration at spring+1 psi overboost limit, gradually increase as system proves safety response

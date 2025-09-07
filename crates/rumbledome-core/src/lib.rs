@@ -9,21 +9,18 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 pub mod config;
 pub mod state;
-pub mod control;
-pub mod learning;
-pub mod safety;
-pub mod torque_following;
+// TODO: Implement remaining core modules
+// pub mod control;
+// pub mod learning;
+// pub mod safety;
+// pub mod torque_following;
 
 pub use config::*;
 pub use state::*;
-pub use control::*;
-pub use learning::*;
-pub use safety::*;
-pub use torque_following::*;
 
 use rumbledome_hal::{HalTrait, HalResult, HalError};
 
@@ -67,18 +64,19 @@ pub struct RumbleDomeCore<H: HalTrait> {
     pub state: SystemState,
     /// User configuration (5 parameters)
     pub config: SystemConfig,
-    /// Learned calibration data
-    pub learned_data: LearnedData,
-    /// Torque-following control logic
-    pub torque_following: TorqueFollowing,
-    /// Safety monitoring system
-    pub safety_monitor: SafetyMonitor,
-    /// Auto-calibration system
-    pub calibration: AutoCalibration,
     /// Hardware abstraction layer
     pub hal: H,
-    /// Control loop statistics
+    /// Control loop statistics  
     pub stats: ControlLoopStats,
+    // TODO: Add these back when modules are implemented
+    // /// Learned calibration data
+    // pub learned_data: LearnedData,
+    // /// Torque-following control logic
+    // pub torque_following: TorqueFollowing,
+    // /// Safety monitoring system
+    // pub safety_monitor: SafetyMonitor,
+    // /// Auto-calibration system
+    // pub calibration: AutoCalibration,
 }
 
 /// System inputs from sensors and CAN
@@ -140,10 +138,6 @@ impl<H: HalTrait> RumbleDomeCore<H> {
         Self {
             state: SystemState::Initializing,
             config,
-            learned_data: LearnedData::default(),
-            torque_following: TorqueFollowing::new(),
-            safety_monitor: SafetyMonitor::new(),
-            calibration: AutoCalibration::new(),
             hal,
             stats: ControlLoopStats::default(),
         }
@@ -166,11 +160,11 @@ impl<H: HalTrait> RumbleDomeCore<H> {
             return Err(CoreError::SafetyViolation("Hardware self-test failed".to_string()));
         }
         
-        // Load learned data
-        self.learned_data = LearnedData::load_from_storage(&mut self.hal)?;
+        // TODO: Load learned data when learning module is implemented
+        // self.learned_data = LearnedData::load_from_storage(&mut self.hal)?;
         
-        // Initialize safety monitor
-        self.safety_monitor.initialize(&self.config)?;
+        // TODO: Initialize safety monitor when safety module is implemented  
+        // self.safety_monitor.initialize(&self.config)?;
         
         // Transition to idle state
         self.state = SystemState::Idle;

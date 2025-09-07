@@ -4,7 +4,12 @@
 //! Derived From: T3-BUILD-003 (Core Control State Machine) + Safety.md state requirements
 //! AI Traceability: Predictable state transitions, fault handling, safety state management
 
-use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use alloc::{string::{String, ToString}, format};
+
+#[cfg(feature = "std")]  
+use std::{string::{String, ToString}, format};
+
 use serde::{Deserialize, Serialize};
 
 /// System operational states

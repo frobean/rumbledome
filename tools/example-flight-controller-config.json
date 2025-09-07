@@ -1,0 +1,112 @@
+{
+  "project_name": "AeroControl",
+  "project_description": "Autonomous flight controller with mission planning",
+  "traceability_schema": {
+    "tiers": ["REQ", "ARCH", "IMPL"],
+    "categories": ["ATTITUDE", "NAVIGATION", "MOTORS", "SENSORS", "SAFETY", "COMM"],
+    "id_format": "{tier}-{category}-{number:03d}"
+  },
+  "code_generators": {
+    "attitude-controller": {
+      "template": "flight_control_system",
+      "traceability_ids": ["ARCH-ATTITUDE-001", "REQ-STABILITY-001"],
+      "target_struct": "AttitudeController",
+      "description": "PID-based attitude stabilization (roll/pitch/yaw)",
+      "control_axes": ["roll", "pitch", "yaw"],
+      "safety_critical": true
+    },
+    "navigation-system": {
+      "template": "navigation_system",
+      "traceability_ids": ["ARCH-NAVIGATION-001", "REQ-WAYPOINT-001"],
+      "target_struct": "NavigationController", 
+      "description": "GPS waypoint navigation with obstacle avoidance",
+      "sensors": ["GPS", "compass", "barometer"],
+      "algorithms": ["path_planning", "obstacle_avoidance"]
+    },
+    "motor-control": {
+      "template": "flight_motor_control",
+      "traceability_ids": ["IMPL-MOTORS-001", "ARCH-ATTITUDE-002"],
+      "target_struct": "QuadMotorControl",
+      "trait_impl": "crate::motors::MotorControl",
+      "description": "Quadcopter motor ESC control",
+      "hardware": "4x ESC via PWM",
+      "safety_requirements": ["REQ-SAFETY-001"],
+      "motor_count": 4,
+      "pwm_frequency": 400
+    },
+    "sensor-fusion": {
+      "template": "flight_sensor_fusion",
+      "traceability_ids": ["IMPL-SENSORS-001", "ARCH-SENSORS-001"],
+      "target_struct": "FlightSensorFusion",
+      "description": "IMU + GPS + barometer sensor fusion",
+      "sensors": {
+        "imu": "6DOF gyro/accel",
+        "magnetometer": "3-axis compass", 
+        "gps": "UART GPS module",
+        "barometer": "I2C pressure sensor"
+      },
+      "algorithms": ["kalman_filter", "complementary_filter"]
+    }
+  },
+  "templates": {
+    "flight_control_system": {
+      "base": "control_system",
+      "customizations": {
+        "pid_control": true,
+        "multi_axis": true,
+        "control_frequency": "1000Hz",
+        "sensor_fusion": true
+      }
+    },
+    "navigation_system": {
+      "base": "control_system",
+      "customizations": {
+        "gps_waypoints": true,
+        "path_planning": true,
+        "obstacle_avoidance": true
+      }
+    },
+    "flight_motor_control": {
+      "base": "hal_implementation",
+      "customizations": {
+        "esc_control": true,
+        "quadcopter_mixing": true,
+        "failsafe_shutdown": true
+      }
+    },
+    "flight_sensor_fusion": {
+      "base": "hal_implementation",
+      "customizations": {
+        "kalman_filtering": true,
+        "multi_sensor": true,
+        "coordinate_transforms": true
+      }
+    }
+  },
+  "validation_rules": {
+    "required_derivation_fields": ["Derived From", "Safety Impact", "Flight Criticality"],
+    "cross_reference_targets": ["FlightSafety.md", "SystemArchitecture.md", "SensorSpecs.md"],
+    "safety_critical_patterns": ["motor shutdown", "failsafe", "emergency landing", "altitude limit"],
+    "blocking_validation": ["duplicate_ids", "missing_safety_analysis"],
+    "health_score_weights": {
+      "duplicate_ids": -10,
+      "missing_safety_analysis": -20,
+      "broken_references": -5,
+      "flight_safety_violations": -25
+    }
+  },
+  "documentation_structure": {
+    "docs_directory": "flight_docs",
+    "key_files": {
+      "requirements": ["FlightRequirements.md", "SafetyRequirements.md"],
+      "architecture": ["SystemArchitecture.md", "SensorSpecs.md"],
+      "implementation": ["FlightController.md", "TestPlan.md"]
+    }
+  },
+  "build_integration": {
+    "pre_commit_validation": true,
+    "target_hardware": "STM32F4",
+    "test_commands": ["cargo test --target thumbv7em-none-eabihf"],
+    "simulation_tests": ["gazebo_sim_test", "hardware_in_loop_test"]
+  }
+}

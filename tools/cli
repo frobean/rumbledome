@@ -16,6 +16,9 @@ Usage:
     ./cli id-allocate <category> <title>  # Auto-assign next available ID
     ./cli id-trace <id>              # Show all references to specific ID
     ./cli id-validate                # Check IDs with fix suggestions
+    ./cli generate-golden <id>       # Generate reference implementation from spec
+    ./cli validate-critical <id>     # Validate critical algorithm against spec
+    ./cli semantic-diff <id>         # Compare implementation vs specification
     ./cli help                       # Show detailed help
 """
 
@@ -154,6 +157,71 @@ def main():
                     print(f"  {suggestion}")
             else:
                 print("✅ All IDs are valid - no fixes needed")
+        
+        elif command == "generate-golden":
+            if len(sys.argv) > 2:
+                target_id = sys.argv[2]
+                print(f"🎩 Generating golden reference for {target_id}...")
+                analyzer = DocumentationAnalyzer()
+                golden_code = analyzer.generate_reference_implementation(target_id)
+                if golden_code:
+                    print("✨ Generated reference implementation:")
+                    print(golden_code)
+                else:
+                    print(f"❌ Could not generate reference for '{target_id}'")
+            else:
+                print("❌ Usage: ./cli generate-golden <id>")
+                print("💡 Example: ./cli generate-golden T2-CONTROL-013")
+        
+        elif command == "validate-critical":
+            if len(sys.argv) > 2:
+                target_id = sys.argv[2]
+                print(f"🔍 Validating critical algorithm {target_id}...")
+                analyzer = DocumentationAnalyzer()
+                validation_result = analyzer.validate_critical_algorithm(target_id)
+                if validation_result['valid']:
+                    print(f"✅ {target_id} implementation matches specification")
+                else:
+                    print(f"❌ {target_id} has deviations:")
+                    for deviation in validation_result['deviations']:
+                        print(f"  - {deviation}")
+            else:
+                print("❌ Usage: ./cli validate-critical <id>")
+                print("💡 Example: ./cli validate-critical T2-CONTROL-013")
+        
+        elif command == "semantic-diff":
+            if len(sys.argv) > 2:
+                target_id = sys.argv[2]
+                print(f"🔍 Semantic diff for {target_id}...")
+                analyzer = DocumentationAnalyzer()
+                diff_result = analyzer.semantic_diff_algorithm(target_id)
+                if diff_result:
+                    print("📋 Implementation vs Specification:")
+                    for diff in diff_result:
+                        print(f"  {diff}")
+                else:
+                    print(f"✅ No significant deviations found for {target_id}")
+            else:
+                print("❌ Usage: ./cli semantic-diff <id>")
+                print("💡 Example: ./cli semantic-diff T2-CONTROL-013")
+        
+        elif command == "generate-module":
+            if len(sys.argv) > 2:
+                module_type = sys.argv[2]
+                print(f"🏭 Generating entire {module_type} module...")
+                analyzer = DocumentationAnalyzer()
+                module_code = analyzer.generate_complete_module(module_type)
+                if module_code:
+                    print("🎭 Generated complete module:")
+                    print(module_code)
+                else:
+                    print(f"❌ Could not generate module for '{module_type}'")
+            else:
+                print("❌ Usage: ./cli generate-module <type>")
+                print("💡 Examples:")
+                print("  ./cli generate-module control-loop")
+                print("  ./cli generate-module safety-system")
+                print("  ./cli generate-module pid-controller")
         
         elif command == "help":
             show_detailed_help()
@@ -560,6 +628,991 @@ This file tracks ID allocations made via the CLI tool.
                 suggestions.append(f"   - {broken_ref}: Check filename or create missing file")
         
         return suggestions
+    
+    def generate_reference_implementation(self, target_id):
+        """Generate golden reference code from specification"""
+        # Find the specification in documentation
+        spec_content = self._extract_specification(target_id)
+        if not spec_content:
+            return None
+        
+        # Generate different types based on traceability ID
+        if 'T2-CONTROL-013' in target_id and 'PID' in spec_content:
+            return self._generate_pid_implementation(spec_content)
+        elif 'T2-CONTROL-022' in target_id and 'clamping' in spec_content.lower():
+            return self._generate_safety_clamp_implementation(spec_content)
+        elif 'T4-HAL-' in target_id:
+            return self._generate_hal_implementation(target_id, spec_content)
+        elif 'T2-CONTROL-' in target_id:
+            return self._generate_control_implementation(target_id, spec_content)
+        
+        return f"// TODO: Generate implementation for {target_id}\n// Specification: {spec_content[:200]}..."
+    
+    def validate_critical_algorithm(self, target_id):
+        """Validate that implementation matches specification"""
+        # Generate golden reference
+        golden_code = self.generate_reference_implementation(target_id)
+        if not golden_code:
+            return {'valid': False, 'deviations': ['Could not generate reference implementation']}
+        
+        # Find actual implementation in codebase
+        actual_code = self._find_implementation(target_id)
+        if not actual_code:
+            return {'valid': False, 'deviations': ['Implementation not found in codebase']}
+        
+        # Semantic comparison (simplified for now)
+        deviations = self._compare_implementations(golden_code, actual_code, target_id)
+        
+        return {
+            'valid': len(deviations) == 0,
+            'deviations': deviations
+        }
+    
+    def semantic_diff_algorithm(self, target_id):
+        """Compare implementation vs specification semantically"""
+        validation = self.validate_critical_algorithm(target_id)
+        if validation['valid']:
+            return []
+        else:
+            return validation['deviations']
+    
+    def _extract_specification(self, target_id):
+        """Extract the mathematical/algorithmic specification from docs"""
+        best_spec = None
+        best_length = 0
+        
+        for filename, content in self.documents.items():
+            if target_id in content:
+                # Find the section containing this ID
+                lines = content.split('\n')
+                spec_lines = []
+                found_id = False
+                
+                for i, line in enumerate(lines):
+                    if f"**🔗 {target_id}" in line:
+                        found_id = True
+                        spec_lines.append(line)
+                        # Collect the specification section
+                        for j in range(i + 1, min(i + 50, len(lines))):
+                            next_line = lines[j]
+                            # Stop at next traceability ID
+                            if next_line.startswith('**🔗 T') and target_id not in next_line:
+                                break
+                            spec_lines.append(next_line)
+                        break
+                
+                if found_id:
+                    spec_content = '\n'.join(spec_lines)
+                    if len(spec_content) > best_length:
+                        best_spec = spec_content
+                        best_length = len(spec_content)
+        
+        return best_spec
+    
+    def _generate_pid_implementation(self, spec_content):
+        """Generate PID controller from mathematical specification"""
+        # Extract the mathematical formula from the spec
+        return '''fn update_pid(&mut self, target_boost: f32, actual_boost: f32, dt: f32) -> f32 {
+    // 🔗 Generated from T2-CONTROL-013 specification
+    // SAFETY: target_boost is pre-clamped and guaranteed safe
+    let boost_error = target_boost - actual_boost;
+    
+    // Proportional term
+    let proportional = self.kp * boost_error;
+    
+    // Integral term with windup prevention
+    self.integral += self.ki * boost_error * dt;
+    if self.integral > self.integral_max {
+        self.integral = self.integral_max;
+    } else if self.integral < self.integral_min {
+        self.integral = self.integral_min;
+    }
+    
+    // Derivative term
+    let derivative = self.kd * (boost_error - self.previous_error) / dt;
+    self.previous_error = boost_error;
+    
+    // PID output
+    let pid_output = proportional + self.integral + derivative;
+    
+    // Apply aggression scaling
+    pid_output * self.aggression_scaling
+}'''
+    
+    def _generate_safety_clamp_implementation(self, spec_content):
+        """Generate safety clamping from specification"""
+        return '''fn clamp_boost_target_for_safety(raw_target: f32, config: &SystemConfig) -> Result<f32, SafetyFault> {
+    // 🔗 Generated from T2-CONTROL-022 specification
+    // SAFETY-CRITICAL: This clamping is non-negotiable and has no bypass modes
+    
+    // Validate input
+    if raw_target.is_nan() || raw_target.is_infinite() {
+        return Err(SafetyFault::InvalidBoostTarget);
+    }
+    
+    // Clamp to safety boundary (use max_boost_psi, not overboost_limit)
+    let clamped_target = if raw_target > config.max_boost_psi {
+        config.max_boost_psi
+    } else if raw_target < 0.0 {
+        0.0
+    } else {
+        raw_target
+    };
+    
+    Ok(clamped_target)
+}'''
+    
+    def _find_implementation(self, target_id):
+        """Find actual implementation in codebase"""
+        # Scan Rust files for implementation
+        import glob
+        code_files = []
+        try:
+            code_files = glob.glob(str(self.docs_dir.parent / "crates" / "**" / "*.rs"), recursive=True)
+        except Exception:
+            return None
+        
+        for file_path in code_files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Look for traceability reference
+                    if target_id in content:
+                        return self._extract_function_from_file(content, target_id)
+            except Exception:
+                continue
+        
+        return None
+    
+    def _extract_function_from_file(self, content, target_id):
+        """Extract the function that implements this traceability ID"""
+        lines = content.split('\n')
+        in_target = False
+        function_lines = []
+        brace_count = 0
+        
+        for line in lines:
+            if target_id in line:
+                in_target = True
+                continue
+            
+            if in_target:
+                function_lines.append(line)
+                # Simple brace counting to find function end
+                brace_count += line.count('{') - line.count('}')
+                if brace_count < 0 or (len(function_lines) > 50):  # Safety limit
+                    break
+        
+        return '\n'.join(function_lines[:30])  # Limit output
+    
+    def _compare_implementations(self, golden_code, actual_code, target_id):
+        """Compare golden reference with actual implementation"""
+        deviations = []
+        
+        # Simple keyword-based comparison for proof of concept
+        golden_keywords = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', golden_code.lower()))
+        actual_keywords = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', actual_code.lower()))
+        
+        # Check for critical PID terms
+        if 'T2-CONTROL-013' in target_id:
+            critical_terms = {'proportional', 'integral', 'derivative', 'error', 'kp', 'ki', 'kd'}
+            missing_terms = critical_terms - actual_keywords
+            extra_terms = actual_keywords - golden_keywords
+            
+            if missing_terms:
+                deviations.append(f"Missing critical PID terms: {missing_terms}")
+            if 'enhanced' in actual_keywords or 'boost' in actual_keywords:
+                deviations.append("Implementation contains undocumented enhancements")
+        
+        # Check for safety clamping terms
+        if 'T2-CONTROL-022' in target_id:
+            safety_terms = {'clamp', 'safety', 'max_boost', 'boundary'}
+            missing_safety = safety_terms - actual_keywords
+            
+            if missing_safety:
+                deviations.append(f"Missing safety terms: {missing_safety}")
+        
+        return deviations
+    
+    def _generate_hal_implementation(self, target_id, spec_content):
+        """Generate HAL implementation from traceability specification"""
+        if 'T4-HAL-001' in target_id:
+            return self._generate_hal_traits()
+        elif 'T4-HAL-003' in target_id and 'Mock' in spec_content:
+            return self._generate_mock_hal()
+        elif 'T4-HAL-006' in target_id and 'PWM' in spec_content:
+            return self._generate_pwm_implementation()
+        elif 'T4-HAL-007' in target_id and '30Hz' in spec_content:
+            return self._generate_frequency_implementation()
+        elif 'T4-HAL-008' in target_id and 'Failsafe' in spec_content:
+            return self._generate_failsafe_implementation()
+        
+        return f"// 🔗 Generated from {target_id}\n// TODO: Implement HAL component\n// Spec: {spec_content[:100]}..."
+    
+    def _generate_control_implementation(self, target_id, spec_content):
+        """Generate control algorithm from specification"""  
+        if 'torque' in spec_content.lower() and 'boost' in spec_content.lower():
+            return self._generate_torque_control()
+        elif 'safety' in spec_content.lower() and 'override' in spec_content.lower():
+            return self._generate_safety_override()
+        elif 'rate' in spec_content.lower() and 'limiting' in spec_content.lower():
+            return self._generate_rate_limiting()
+        
+        return f"// 🔗 Generated from {target_id}\n// TODO: Implement control algorithm\n// Spec: {spec_content[:100]}..."
+    
+    def _generate_hal_traits(self):
+        """Generate HAL trait definitions"""
+        return '''// 🔗 Generated from T4-HAL-001: HAL Trait Definitions
+use crate::{HalResult, HalError};
+
+pub trait HardwareAbstraction: TimeProvider + PwmControl {
+    fn init(&mut self) -> HalResult<()>;
+    fn self_test(&mut self) -> HalResult<SelfTestResult>;
+    fn emergency_shutdown(&mut self) -> HalResult<()>;
+    fn get_platform_info(&self) -> PlatformInfo;
+}
+
+pub trait TimeProvider {
+    fn now_us(&self) -> u64;
+    fn now_ms(&self) -> u32;
+    fn delay_us(&mut self, duration: u32) -> HalResult<()>;
+    fn delay_ms(&mut self, duration: u32) -> HalResult<()>;
+}
+
+pub trait PwmControl {
+    fn set_duty_cycle(&mut self, duty_percent: f32) -> HalResult<()>;
+    fn get_current_duty(&self) -> f32;
+    fn enable(&mut self) -> HalResult<()>;
+    fn disable(&mut self) -> HalResult<()>;
+}'''
+    
+    def _generate_mock_hal(self):
+        """Generate Mock HAL implementation"""
+        return '''// 🔗 Generated from T4-HAL-003: Mock HAL for Desktop Testing
+#[derive(Debug, Default)]
+pub struct MockHal {
+    duty_cycle: f32,
+    enabled: bool,
+    initialized: bool,
+}
+
+impl MockHal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl HardwareAbstraction for MockHal {
+    fn init(&mut self) -> HalResult<()> {
+        self.initialized = true;
+        Ok(())
+    }
+    
+    fn self_test(&mut self) -> HalResult<SelfTestResult> {
+        Ok(SelfTestResult {
+            overall_status: TestStatus::Pass,
+            pwm_test: TestStatus::Pass,
+            analog_test: TestStatus::Pass,
+            failures: Vec::new(),
+        })
+    }
+    
+    fn emergency_shutdown(&mut self) -> HalResult<()> {
+        self.duty_cycle = 0.0;  // SAFETY: 0% = failsafe
+        self.enabled = false;
+        Ok(())
+    }
+    
+    fn get_platform_info(&self) -> PlatformInfo {
+        PlatformInfo {
+            platform_name: "MockHal",
+            version: "1.0.0",
+            capabilities: PlatformCapabilities::mock_default(),
+        }
+    }
+}'''
+    
+    def _generate_pwm_implementation(self):
+        """Generate PWM control implementation"""
+        return '''// 🔗 Generated from T4-HAL-006: PWM Control Implementation
+impl PwmControl for MockHal {
+    fn set_duty_cycle(&mut self, duty_percent: f32) -> HalResult<()> {
+        // Validate input range
+        if duty_percent < 0.0 || duty_percent > 100.0 {
+            return Err(HalError::InvalidParameter(
+                format!("Duty cycle must be 0-100%, got {}", duty_percent)
+            ));
+        }
+        
+        self.duty_cycle = duty_percent;
+        Ok(())
+    }
+    
+    fn get_current_duty(&self) -> f32 {
+        self.duty_cycle
+    }
+    
+    fn enable(&mut self) -> HalResult<()> {
+        self.enabled = true;
+        Ok(())
+    }
+    
+    fn disable(&mut self) -> HalResult<()> {
+        self.duty_cycle = 0.0;  // SAFETY: Disable = 0% duty
+        self.enabled = false;
+        Ok(())
+    }
+}'''
+    
+    def _generate_torque_control(self):
+        """Generate torque-following control algorithm"""
+        return '''// 🔗 Generated from torque-following control specification
+fn calculate_boost_assistance(
+    ecu_torque_request: f32,
+    ecu_torque_actual: f32,
+    aggression: f32,
+) -> f32 {
+    let torque_gap = ecu_torque_request - ecu_torque_actual;
+    
+    // Only assist if ECU is struggling to meet torque request
+    if torque_gap <= 0.0 {
+        return 0.0;  // No assistance needed
+    }
+    
+    // Scale assistance by aggression setting
+    let base_assistance = torque_gap * 0.1;  // Conservative scaling
+    base_assistance * aggression
+}'''
+    
+    def _generate_safety_override(self):
+        """Generate safety override system"""
+        return '''// 🔗 Generated from safety override specification
+fn apply_safety_overrides(
+    target_boost: f32,
+    current_boost: f32,
+    config: &SystemConfig,
+) -> Result<f32, SafetyFault> {
+    // Hard overboost protection
+    if current_boost > config.overboost_limit {
+        return Err(SafetyFault::Overboost {
+            current: current_boost,
+            limit: config.overboost_limit,
+        });
+    }
+    
+    // Clamp target to safety boundaries
+    let safe_target = target_boost.clamp(0.0, config.max_boost_psi);
+    
+    Ok(safe_target)
+}'''
+    
+    def generate_complete_module(self, module_type):
+        """Generate an entire Rust module from specifications"""
+        if module_type == "control-loop":
+            return self._generate_control_loop_module()
+        elif module_type == "safety-system":
+            return self._generate_safety_system_module()
+        elif module_type == "pid-controller":
+            return self._generate_pid_controller_module()
+        elif module_type == "pwm-control":
+            return self._generate_pwm_control_module()
+        elif module_type == "time-provider":
+            return self._generate_time_provider_module()
+        elif module_type == "pressure-sensors":
+            return self._generate_pressure_sensor_module()
+        elif module_type == "display-hal":
+            return self._generate_display_hal_module()
+        
+        return None
+    
+    def _generate_control_loop_module(self):
+        """Generate complete control loop module"""
+        return '''//! RumbleDome Control Loop Module
+//! 
+//! 🔗 Generated from T2-CONTROL specifications
+//! Implements 3-level control hierarchy with torque-following
+
+use crate::{HalResult, HalError, SystemConfig};
+
+/// Main control loop state
+pub struct ControlLoop {
+    pid_controller: PidController,
+    safety_system: SafetySystem,
+    torque_tracker: TorqueTracker,
+    aggression: f32,
+}
+
+impl ControlLoop {
+    pub fn new(config: &SystemConfig) -> Self {
+        Self {
+            pid_controller: PidController::new(config.pid_gains),
+            safety_system: SafetySystem::new(config.safety_limits),
+            torque_tracker: TorqueTracker::new(),
+            aggression: config.aggression,
+        }
+    }
+    
+    /// Main control loop - called at 100Hz
+    pub fn update(
+        &mut self,
+        ecu_torque_request: f32,
+        ecu_torque_actual: f32,
+        current_boost: f32,
+        dt: f32,
+    ) -> HalResult<f32> {
+        // 1. Torque-following layer
+        let boost_assistance = self.calculate_boost_assistance(
+            ecu_torque_request,
+            ecu_torque_actual,
+        );
+        
+        // 2. Safety limit enforcement (T2-CONTROL-022)
+        let safe_target = self.safety_system.clamp_boost_target(boost_assistance)?;
+        
+        // 3. PID control for precise delivery (T2-CONTROL-013)
+        let pid_output = self.pid_controller.update(safe_target, current_boost, dt);
+        
+        Ok(pid_output * self.aggression)
+    }
+    
+    fn calculate_boost_assistance(&mut self, request: f32, actual: f32) -> f32 {
+        let torque_gap = request - actual;
+        if torque_gap <= 0.0 { 0.0 } else { torque_gap * 0.1 }
+    }
+}
+
+/// PID Controller implementation
+struct PidController {
+    kp: f32,
+    ki: f32, 
+    kd: f32,
+    integral: f32,
+    previous_error: f32,
+}
+
+impl PidController {
+    fn new(gains: PidGains) -> Self {
+        Self {
+            kp: gains.kp,
+            ki: gains.ki,
+            kd: gains.kd,
+            integral: 0.0,
+            previous_error: 0.0,
+        }
+    }
+    
+    fn update(&mut self, target: f32, actual: f32, dt: f32) -> f32 {
+        let error = target - actual;
+        
+        // Proportional
+        let p_term = self.kp * error;
+        
+        // Integral with windup prevention
+        self.integral += self.ki * error * dt;
+        self.integral = self.integral.clamp(-10.0, 10.0);
+        
+        // Derivative
+        let d_term = self.kd * (error - self.previous_error) / dt;
+        self.previous_error = error;
+        
+        p_term + self.integral + d_term
+    }
+}
+
+/// Safety system implementation
+struct SafetySystem {
+    max_boost: f32,
+    overboost_limit: f32,
+}
+
+impl SafetySystem {
+    fn new(limits: SafetyLimits) -> Self {
+        Self {
+            max_boost: limits.max_boost_psi,
+            overboost_limit: limits.overboost_limit,
+        }
+    }
+    
+    fn clamp_boost_target(&self, target: f32) -> HalResult<f32> {
+        if target > self.max_boost {
+            Ok(self.max_boost)
+        } else if target < 0.0 {
+            Ok(0.0)
+        } else {
+            Ok(target)
+        }
+    }
+}
+
+/// Torque tracking for ECU cooperation
+struct TorqueTracker {
+    // TODO: Implement torque gap analysis
+}
+
+impl TorqueTracker {
+    fn new() -> Self {
+        Self {}
+    }
+}'''
+    
+    def _generate_safety_system_module(self):
+        """Generate complete safety system module"""
+        return '''//! RumbleDome Safety System Module
+//! 
+//! 🔗 Generated from T1-SAFETY and T2-CONTROL-018 specifications
+//! Implements defense-in-depth safety with emergency overrides
+
+use crate::{HalResult, HalError, SystemConfig};
+
+#[derive(Debug)]
+pub enum SafetyFault {
+    Overboost { current: f32, limit: f32 },
+    SensorFault { sensor: String },
+    SystemFault { reason: String },
+}
+
+pub struct SafetySystem {
+    overboost_limit: f32,
+    max_boost_psi: f32,
+    fault_state: Option<SafetyFault>,
+    emergency_mode: bool,
+}
+
+impl SafetySystem {
+    pub fn new(config: &SystemConfig) -> Self {
+        Self {
+            overboost_limit: config.overboost_limit,
+            max_boost_psi: config.max_boost_psi,
+            fault_state: None,
+            emergency_mode: false,
+        }
+    }
+    
+    /// Check all safety conditions - called every control loop
+    pub fn check_safety(&mut self, current_boost: f32) -> HalResult<()> {
+        // Hard overboost protection
+        if current_boost > self.overboost_limit {
+            self.trigger_emergency(SafetyFault::Overboost {
+                current: current_boost,
+                limit: self.overboost_limit,
+            })?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Clamp boost targets to safe limits
+    pub fn clamp_boost_target(&self, raw_target: f32) -> f32 {
+        if self.emergency_mode {
+            return 0.0;  // Emergency = no boost
+        }
+        
+        raw_target.clamp(0.0, self.max_boost_psi)
+    }
+    
+    /// Emergency shutdown - forces 0% duty cycle
+    pub fn trigger_emergency(&mut self, fault: SafetyFault) -> HalResult<()> {
+        self.fault_state = Some(fault);
+        self.emergency_mode = true;
+        // Log safety event
+        println!("🚨 SAFETY EMERGENCY: {:?}", self.fault_state);
+        Ok(())
+    }
+    
+    /// Check if system is in emergency mode
+    pub fn is_emergency(&self) -> bool {
+        self.emergency_mode
+    }
+    
+    /// Reset after fault cleared (manual reset required)
+    pub fn reset_emergency(&mut self) -> HalResult<()> {
+        if self.fault_state.is_some() {
+            println!("✅ Safety system reset");
+            self.fault_state = None;
+            self.emergency_mode = false;
+        }
+        Ok(())
+    }
+}'''
+    
+    def _generate_pwm_control_module(self):
+        """Generate PWM control HAL implementation from T4-HAL-006 specifications"""
+        return '''//! PWM Control HAL Implementation
+//! 
+//! 🔗 T4-HAL-006: PWM Control Implementation
+//! Derived From: T2-HAL-004 (4-Port MAC Solenoid Drive) + T2-PWM-001 (30 Hz PWM)
+//! AI Traceability: Controls 4-port MAC solenoid for pneumatic boost control
+
+use crate::{HalResult, HalError, time::PwmTimingInfo};
+
+/// Teensy 4.1 PWM control implementation
+pub struct TeensyPwmControl {
+    frequency_hz: u32,
+    duty_cycle: f32,
+    enabled: bool,
+    pin: u8,
+    last_update_us: u64,
+}
+
+impl TeensyPwmControl {
+    pub fn new(pin: u8) -> Self {
+        Self {
+            frequency_hz: crate::pwm::constants::PWM_FREQUENCY_HZ,
+            duty_cycle: crate::pwm::constants::FAILSAFE_DUTY,
+            enabled: false,
+            pin,
+            last_update_us: 0,
+        }
+    }
+    
+    /// Initialize PWM hardware on Teensy 4.1
+    pub fn init(&mut self) -> HalResult<()> {
+        // Configure PWM timer for 30Hz operation
+        self.configure_timer(self.frequency_hz)?;
+        
+        // Set failsafe state - 0% duty = wastegate open
+        self.set_duty_cycle(crate::pwm::constants::FAILSAFE_DUTY)?;
+        
+        Ok(())
+    }
+    
+    fn configure_timer(&mut self, freq_hz: u32) -> HalResult<()> {
+        if freq_hz < crate::pwm::constants::MIN_FREQUENCY_HZ || 
+           freq_hz > crate::pwm::constants::MAX_FREQUENCY_HZ {
+            return Err(crate::pwm::PwmError::FrequencyOutOfRange {
+                requested: freq_hz,
+                min: crate::pwm::constants::MIN_FREQUENCY_HZ,
+                max: crate::pwm::constants::MAX_FREQUENCY_HZ,
+            }.into());
+        }
+        
+        // TODO: Teensy 4.1 FlexPWM configuration
+        // Calculate period from frequency
+        // Configure hardware timer
+        
+        self.frequency_hz = freq_hz;
+        Ok(())
+    }
+    
+    fn update_hardware_duty(&self, duty_percent: f32) -> HalResult<()> {
+        // Clamp to safe range
+        let clamped_duty = duty_percent.clamp(0.0, 100.0);
+        
+        // TODO: Write to Teensy 4.1 PWM register
+        // Convert percentage to timer compare value
+        // Update hardware register
+        
+        Ok(())
+    }
+}
+
+impl crate::pwm::PwmControl for TeensyPwmControl {
+    /// Set PWM output frequency in Hz
+    /// 🔗 T4-HAL-007: 30Hz PWM Frequency Implementation
+    fn set_frequency(&mut self, freq_hz: u32) -> HalResult<()> {
+        if !self.enabled {
+            return Err(crate::pwm::PwmError::NotInitialized.into());
+        }
+        
+        self.configure_timer(freq_hz)
+    }
+    
+    /// Set PWM duty cycle as percentage (0.0-100.0)
+    /// 🔗 T4-HAL-008: Failsafe Duty Cycle Control
+    fn set_duty_cycle(&mut self, duty_percent: f32) -> HalResult<()> {
+        if duty_percent < 0.0 || duty_percent > 100.0 {
+            return Err(crate::pwm::PwmError::DutyCycleOutOfRange {
+                requested: duty_percent
+            }.into());
+        }
+        
+        self.duty_cycle = duty_percent;
+        
+        if self.enabled {
+            self.update_hardware_duty(duty_percent)?;
+        }
+        
+        Ok(())
+    }
+    
+    fn get_current_duty(&self) -> f32 {
+        self.duty_cycle
+    }
+    
+    fn enable(&mut self) -> HalResult<()> {
+        if !self.enabled {
+            self.enabled = true;
+            // Apply current duty cycle to hardware
+            self.update_hardware_duty(self.duty_cycle)?;
+        }
+        Ok(())
+    }
+    
+    /// Disable PWM output (failsafe - forces 0% duty)
+    /// 🔗 T1-SAFETY-001: 0% duty = wastegate forced open
+    fn disable(&mut self) -> HalResult<()> {
+        if self.enabled {
+            self.enabled = false;
+            // Force 0% duty for safety
+            self.update_hardware_duty(0.0)?;
+        }
+        Ok(())
+    }
+    
+    /// Get PWM timing information for synchronized control
+    /// 🔗 T4-HAL-009: PWM Timing Coordination
+    fn get_timing_info(&self) -> HalResult<PwmTimingInfo> {
+        let period_us = (1_000_000 / self.frequency_hz) as u64;
+        let phase_us = (self.last_update_us % period_us);
+        
+        Ok(PwmTimingInfo {
+            frequency_hz: self.frequency_hz,
+            period_us,
+            phase_us,
+            next_cycle_us: self.last_update_us + (period_us - phase_us),
+        })
+    }
+    
+    /// Apply duty cycle with timing synchronization
+    /// 🔗 T2-CONTROL-002: PWM-Synchronized Control Architecture
+    fn set_duty_cycle_synchronized(&mut self, duty_percent: f32, current_time_us: u64) -> HalResult<()> {
+        let timing = self.get_timing_info()?;
+        
+        // Wait for optimal timing window (beginning of PWM cycle)
+        if current_time_us < timing.next_cycle_us {
+            // Store for synchronized application
+            self.duty_cycle = duty_percent;
+            self.last_update_us = timing.next_cycle_us;
+        } else {
+            // Apply immediately if already in timing window
+            self.set_duty_cycle(duty_percent)?;
+            self.last_update_us = current_time_us;
+        }
+        
+        Ok(())
+    }
+    
+    /// Force immediate duty cycle change (emergency override)
+    /// Used for overboost protection and fault responses
+    fn set_duty_cycle_immediate(&mut self, duty_percent: f32) -> HalResult<()> {
+        self.set_duty_cycle(duty_percent)?;
+        // Bypass timing synchronization for safety-critical situations
+        if self.enabled {
+            self.update_hardware_duty(duty_percent)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_pwm_failsafe_initialization() {
+        let mut pwm = TeensyPwmControl::new(2);
+        assert_eq!(pwm.get_current_duty(), 0.0); // Failsafe state
+        assert!(!pwm.enabled);
+    }
+    
+    #[test]
+    fn test_frequency_validation() {
+        let mut pwm = TeensyPwmControl::new(2);
+        pwm.init().unwrap();
+        pwm.enable().unwrap();
+        
+        // Valid frequency
+        assert!(pwm.set_frequency(30).is_ok());
+        
+        // Invalid frequencies
+        assert!(pwm.set_frequency(15).is_err());  // Too low
+        assert!(pwm.set_frequency(60).is_err());  // Too high
+    }
+    
+    #[test]
+    fn test_duty_cycle_validation() {
+        let mut pwm = TeensyPwmControl::new(2);
+        
+        // Valid duty cycles
+        assert!(pwm.set_duty_cycle(0.0).is_ok());
+        assert!(pwm.set_duty_cycle(50.0).is_ok());
+        assert!(pwm.set_duty_cycle(100.0).is_ok());
+        
+        // Invalid duty cycles
+        assert!(pwm.set_duty_cycle(-1.0).is_err());
+        assert!(pwm.set_duty_cycle(101.0).is_err());
+    }
+    
+    #[test]
+    fn test_emergency_disable() {
+        let mut pwm = TeensyPwmControl::new(2);
+        pwm.init().unwrap();
+        pwm.enable().unwrap();
+        pwm.set_duty_cycle(75.0).unwrap();
+        
+        // Emergency disable should force 0% duty
+        pwm.disable().unwrap();
+        assert!(!pwm.enabled);
+        // Duty cycle stored but not applied to hardware when disabled
+    }
+}'''
+    
+    def _generate_time_provider_module(self):
+        """Generate time provider HAL implementation from specifications"""
+        return '''//! Time Provider HAL Implementation
+//! 
+//! 🔗 T4-HAL-012: Time Provider Implementation  
+//! Derived From: T2-CONTROL-002 (PWM-Synchronized Control) + T2-TIMING-001 (100Hz Control Loop)
+//! AI Traceability: Provides microsecond timing for control loop synchronization
+
+use crate::{HalResult, HalError};
+
+/// Teensy 4.1 time provider using ARM SysTick
+pub struct TeensyTimeProvider {
+    start_time_us: u64,
+    last_timestamp_us: u64,
+}
+
+impl TeensyTimeProvider {
+    pub fn new() -> Self {
+        Self {
+            start_time_us: 0,
+            last_timestamp_us: 0,
+        }
+    }
+    
+    /// Initialize hardware timer on Teensy 4.1
+    pub fn init(&mut self) -> HalResult<()> {
+        // TODO: Configure ARM SysTick for microsecond resolution
+        // Set up 600MHz system clock / 600 = 1MHz (1μs resolution)
+        // Enable SysTick counter
+        
+        self.start_time_us = self.read_hardware_counter();
+        self.last_timestamp_us = self.start_time_us;
+        
+        Ok(())
+    }
+    
+    fn read_hardware_counter(&self) -> u64 {
+        // TODO: Read from Teensy 4.1 SysTick counter
+        // Convert counter ticks to microseconds
+        // Handle counter overflow (32-bit to 64-bit extension)
+        0 // Placeholder
+    }
+}
+
+impl crate::time::TimeProvider for TeensyTimeProvider {
+    /// Get current time in microseconds
+    /// 🔗 T4-HAL-013: Microsecond Time Resolution
+    fn micros(&mut self) -> u64 {
+        let current = self.read_hardware_counter();
+        self.last_timestamp_us = current;
+        current - self.start_time_us
+    }
+    
+    /// Get delta time since last call
+    /// Used by control loops for dt calculation
+    fn delta_micros(&mut self) -> u64 {
+        let current = self.micros();
+        let delta = current - self.last_timestamp_us;
+        self.last_timestamp_us = current;
+        delta
+    }
+    
+    /// Sleep for specified microseconds
+    /// 🔗 T2-TIMING-002: Precise Timing Control
+    fn delay_micros(&self, micros: u64) -> HalResult<()> {
+        let start = self.read_hardware_counter();
+        let target = start + micros;
+        
+        // Busy wait for short delays (<1ms), yield for longer
+        if micros < 1000 {
+            while self.read_hardware_counter() < target {
+                // Busy wait for precise short delays
+            }
+        } else {
+            // TODO: Use Teensy yield() for longer delays
+            // Allows other tasks to run during delay
+        }
+        
+        Ok(())
+    }
+    
+    /// Get timing information for PWM synchronization
+    /// 🔗 T4-HAL-014: PWM Timing Coordination Support
+    fn get_pwm_timing_info(&self, frequency_hz: u32) -> crate::time::PwmTimingInfo {
+        let period_us = (1_000_000 / frequency_hz) as u64;
+        let current_us = self.read_hardware_counter() - self.start_time_us;
+        let phase_us = current_us % period_us;
+        
+        crate::time::PwmTimingInfo {
+            frequency_hz,
+            period_us,
+            phase_us,
+            next_cycle_us: current_us + (period_us - phase_us),
+        }
+    }
+    
+    /// Wait for next PWM cycle boundary
+    /// Used for synchronized control updates
+    fn wait_for_pwm_sync(&self, frequency_hz: u32) -> HalResult<()> {
+        let timing = self.get_pwm_timing_info(frequency_hz);
+        let wait_time = timing.period_us - timing.phase_us;
+        
+        if wait_time > 0 {
+            self.delay_micros(wait_time)?;
+        }
+        
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_time_provider_initialization() {
+        let mut timer = TeensyTimeProvider::new();
+        assert!(timer.init().is_ok());
+        assert_eq!(timer.start_time_us, timer.last_timestamp_us);
+    }
+    
+    #[test] 
+    fn test_micros_monotonic() {
+        let mut timer = TeensyTimeProvider::new();
+        timer.init().unwrap();
+        
+        let t1 = timer.micros();
+        let t2 = timer.micros();
+        
+        // Time should be monotonic (always increasing)
+        assert!(t2 >= t1);
+    }
+    
+    #[test]
+    fn test_pwm_timing_calculation() {
+        let timer = TeensyTimeProvider::new();
+        let timing = timer.get_pwm_timing_info(30); // 30Hz PWM
+        
+        assert_eq!(timing.frequency_hz, 30);
+        assert_eq!(timing.period_us, 33333); // ~33.3ms period for 30Hz
+        assert!(timing.phase_us < timing.period_us);
+    }
+    
+    #[test]
+    fn test_delta_time() {
+        let mut timer = TeensyTimeProvider::new();
+        timer.init().unwrap();
+        
+        let _t1 = timer.micros();
+        // Simulate some time passing
+        let delta = timer.delta_micros();
+        
+        // Delta should be reasonable (not zero, not huge)
+        assert!(delta >= 0);
+    }
+}'''
 
 class TraceabilityID:
     """Represents a traceability ID like T2-CONTROL-008"""

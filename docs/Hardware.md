@@ -92,15 +92,59 @@ trait Analog {
 }
 ```
 
-**Pressure Sensor Requirements**:
-- **Sensor Output**: 0.5V - 4.5V (ratiometric to 5V supply)
+**🔗 T2-HAL-006**: **Pressure Sensor Specifications and Calibration**  
+**Derived From**: Commercial pressure sensor specifications + automotive accuracy requirements  
+**Decision Type**: ⚠️ **Engineering Decision** - Baseline sensor characteristics for implementation  
+**Engineering Rationale**: Generic Chinese automotive pressure sensors provide adequate accuracy for boost control applications  
+**AI Traceability**: Drives ADC requirements, calibration algorithms, sensor fault detection
+
+**Target Pressure Sensor Specifications**:
+- **Range**: 0-30 PSI (gauge pressure)
+- **Output**: 0.5V - 4.5V linear (ratiometric to 5V supply)
+- **Calibration Points**: 0 PSI = 0.5V, 15 PSI = 2.5V, 30 PSI = 4.5V
+- **Accuracy**: ±2% of full scale (±0.6 PSI typical)
+- **Linearity**: Linear voltage output across full pressure range
+- **Reliability**: Good accuracy when functional, moderate failure rate
+
+**Linear Conversion Algorithm**:
+```rust
+// Pressure sensor voltage-to-PSI conversion
+const SENSOR_MIN_VOLTAGE: f32 = 0.5;  // 0 PSI
+const SENSOR_MAX_VOLTAGE: f32 = 4.5;  // 30 PSI  
+const SENSOR_VOLTAGE_SPAN: f32 = 4.0; // 4V span
+const SENSOR_PRESSURE_SPAN: f32 = 30.0; // 30 PSI span
+const VOLTS_PER_PSI: f32 = SENSOR_VOLTAGE_SPAN / SENSOR_PRESSURE_SPAN; // 0.1333 V/PSI
+
+fn voltage_to_psi(voltage: f32) -> Result<f32, SensorError> {
+    // Range validation for sensor fault detection
+    if voltage < 0.3 || voltage > 4.7 {
+        return Err(SensorError::OutOfRange { voltage });
+    }
+    
+    // Linear conversion
+    let pressure = (voltage - SENSOR_MIN_VOLTAGE) / VOLTS_PER_PSI;
+    Ok(pressure.clamp(0.0, 35.0)) // Allow slight overrange
+}
+
+fn psi_to_voltage(pressure: f32) -> f32 {
+    (pressure * VOLTS_PER_PSI) + SENSOR_MIN_VOLTAGE
+}
+```
+
+**Teensy 4.1 ADC Interface Requirements**:
 - **Teensy Input Range**: 0.33V - 2.97V (after 5V→3.3V voltage divider)
 - **Voltage Divider**: Precision resistors, 3.3V/5V = 0.66 ratio
-- **Resolution**: 12-bit minimum (4096 steps across 2.64V span)
-- **Accuracy**: ±1% full scale
-- **Sample Rate**: 1000 Hz minimum per channel
+- **Resolution**: 12-bit minimum (4096 steps across 2.64V span = 0.64mV/step)
+- **Pressure Resolution**: ~0.05 PSI per ADC count (adequate for control)
+- **Sample Rate**: 1000 Hz minimum per channel for 100Hz control loop
 - **Input Impedance**: >10MΩ to avoid sensor loading
-- **Filtering**: Hardware low-pass filtering recommended (100 Hz cutoff)
+- **Hardware Filtering**: 100 Hz low-pass filter recommended for noise reduction
+
+**Sensor Fault Detection**:
+- **Out-of-range voltage** (<0.3V or >4.7V) indicates sensor failure
+- **Static readings** (no change over time) may indicate stuck sensor
+- **Cross-sensor validation** using multiple sensors for same pressure measurement
+- **Atmospheric pressure check** (dome input sensor should read ~14.7 PSI when system off)
 
 ### Storage (Non-Volatile Memory)
 ```rust
@@ -295,7 +339,7 @@ pub struct BluetoothConnectionInfo {
 
 **Bluetooth Architecture**:
 
-**🔗 T2-HAL-006**: **Wireless CLI Console Access**  
+**🔗 T2-HAL-012**: **Wireless CLI Console Access**  
 **Derived From**: T1-UI-001 (Single Parameter Philosophy) + mobile accessibility requirements  
 **Decision Type**: ⚠️ **Engineering Decision** - Bluetooth SPP abstraction layer for wireless console access  
 **Engineering Rationale**: Same CLI commands over wireless eliminates duplicate interfaces, maintains consistency  
