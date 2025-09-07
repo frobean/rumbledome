@@ -1,0 +1,46 @@
+# RumbleDome Teensy 4.1 Firmware Binary
+# 
+# 🔗 T4-BUILD-005: Firmware Crate Configuration
+# Derived From: T3-BUILD-005 (Teensy 4.1 Integration) + embedded target requirements
+# AI Traceability: Embedded firmware binary, hardware initialization, real-time control
+
+[package]
+name = "rumbledome-fw"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "Teensy 4.1 firmware binary for RumbleDome boost controller"
+license = "CC-BY-NC-4.0"
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Local dependencies
+rumbledome-hal = { path = "../rumbledome-hal", features = ["embedded"] }
+rumbledome-core = { path = "../rumbledome-core" }
+rumbledome-protocol = { path = "../rumbledome-protocol" }
+
+# Embedded dependencies
+cortex-m = { workspace = true }
+cortex-m-rt = "0.7"
+embedded-hal = { workspace = true }
+nb = { workspace = true }
+
+# Teensy 4.1 specific
+teensy4-bsp = "0.4"
+teensy4-panic = "0.2"
+
+# Time utilities
+fugit = { workspace = true }
+
+# No-std data structures
+heapless = { workspace = true }
+
+# Panic handler
+panic-halt = "0.2"
+
+[features]
+default = []
+
+[[bin]]
+name = "rumbledome-fw" 
+path = "src/main.rs"

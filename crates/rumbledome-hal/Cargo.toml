@@ -1,0 +1,45 @@
+# RumbleDome Hardware Abstraction Layer
+# 
+# 🔗 T4-BUILD-002: HAL Crate Configuration
+# Derived From: T3-BUILD-002 (HAL Architecture) + cross-platform requirements
+# AI Traceability: Enables platform abstraction, mock testing, embedded target support
+
+[package]
+name = "rumbledome-hal"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "Hardware abstraction layer for RumbleDome boost controller"
+license = "CC-BY-NC-4.0"
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Workspace dependencies
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+nb = { workspace = true }
+
+# Embedded HAL traits
+embedded-hal = { workspace = true, optional = true }
+
+# Time utilities
+fugit = { workspace = true }
+
+# Mock implementation dependencies (desktop only)
+tokio = { workspace = true, optional = true, features = ["time", "sync"] }
+log = { workspace = true, optional = true }
+
+[features]
+default = ["mock"]
+
+# Mock HAL implementation for desktop testing
+mock = ["tokio", "log"]
+
+# Real embedded HAL implementation
+embedded = ["embedded-hal"]
+
+# Enable std for desktop builds
+std = []
+
+[lib]
+name = "rumbledome_hal"

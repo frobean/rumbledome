@@ -1,0 +1,52 @@
+# RumbleDome Configuration Tool
+# 
+# 🔗 T4-BUILD-007: CLI Crate Configuration
+# Derived From: T3-BUILD-007 (Configuration Management) + CLI interface requirements
+# AI Traceability: User configuration, system diagnostics, calibration management
+
+[package]
+name = "rumbledome-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "Configuration tool for RumbleDome boost controller"
+license = "CC-BY-NC-4.0"
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Local dependencies
+rumbledome-core = { path = "../rumbledome-core", features = ["std"] }
+rumbledome-protocol = { path = "../rumbledome-protocol", features = ["std"] }
+
+# CLI interface
+clap = { workspace = true, features = ["derive"] }
+console = { workspace = true }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Configuration management
+directories = { workspace = true }
+
+# Logging
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# Serial communication (for Teensy)
+serialport = "4.2"
+
+# Error handling
+anyhow = "1.0"
+
+[dev-dependencies]
+approx = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+
+[[bin]]
+name = "rumbledome-cli"
+path = "src/main.rs"

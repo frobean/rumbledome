@@ -5,25 +5,40 @@
 //! Decision Type: 🔗 Direct Derivation - Implementation of HAL abstraction interfaces
 //! AI Traceability: Enables desktop simulation, multi-platform support, comprehensive testing
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec::Vec, string::String, format};
+
+#[cfg(feature = "std")]
+use std::{vec::Vec, string::String, format};
 
 pub mod time;
 pub mod pwm;
-pub mod analog;
-pub mod storage;
-pub mod can;
-pub mod display;
-pub mod gpio;
-pub mod bluetooth;
+
+// Mock implementation for desktop testing
+#[cfg(feature = "mock")]
+pub mod simple_mock;
+
+// TODO: Create remaining HAL modules as needed
+// pub mod analog;
+// pub mod storage; 
+// pub mod can;
+// pub mod display;
+// pub mod gpio;
+// pub mod bluetooth;
 
 pub use time::*;
 pub use pwm::*;
-pub use analog::*;
-pub use storage::*;
-pub use can::*;
-pub use display::*;
-pub use gpio::*;
-pub use bluetooth::*;
+
+#[cfg(feature = "mock")]
+pub use simple_mock::SimpleMockHal as MockHal;
 
 /// Core error type for all HAL operations
 #[derive(Debug, Clone, PartialEq)]
@@ -51,13 +66,14 @@ pub type HalResult<T> = Result<T, HalError>;
 /// AI Traceability: Single point of hardware abstraction for core control logic
 pub trait HalTrait: 
     TimeProvider + 
-    PwmControl + 
-    AnalogInput + 
-    NonVolatileStorage + 
-    CanInterface + 
-    DisplayInterface + 
-    GpioControl + 
-    BluetoothSerial 
+    PwmControl 
+    // TODO: Add remaining HAL interfaces as modules are implemented
+    // + AnalogInput + 
+    // + NonVolatileStorage + 
+    // + CanInterface + 
+    // + DisplayInterface + 
+    // + GpioControl + 
+    // + BluetoothSerial 
 {
     /// Initialize all hardware subsystems
     fn init(&mut self) -> HalResult<()>;

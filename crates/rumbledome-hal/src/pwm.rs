@@ -4,6 +4,12 @@
 //! Derived From: T2-HAL-004 (4-Port MAC Solenoid Drive Requirements) + T2-PWM-001 (30 Hz PWM)
 //! AI Traceability: Controls 4-port MAC solenoid for pneumatic boost control
 
+#[cfg(not(feature = "std"))]
+use alloc::{string::{String, ToString}, format};
+
+#[cfg(feature = "std")]
+use std::{string::{String, ToString}, format};
+
 use crate::{HalResult, HalError, time::PwmTimingInfo};
 
 /// PWM control interface for solenoid drive

@@ -1,0 +1,38 @@
+# RumbleDome Cargo Configuration
+# 
+# 🔗 T4-BUILD-008: Cross-Compilation Configuration
+# Derived From: M4 Mac development + Teensy 4.1 embedded target requirements
+# AI Traceability: Enables cross-compilation from ARM64 Mac to ARM Cortex-M7
+
+[build]
+# Default to native ARM64 for development/simulation
+target = "aarch64-apple-darwin"
+
+# Embedded target configuration for Teensy 4.1
+[target.thumbv7em-none-eabihf]
+# Teensy Loader CLI for flashing firmware
+runner = "teensy_loader_cli --mcu=TEENSY41 -w"
+
+rustflags = [
+  # Linker script for Cortex-M
+  "-C", "link-arg=-Tlink.x",
+  # Optimize for size 
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+# Target-specific dependencies
+[target.thumbv7em-none-eabihf.dependencies]
+
+# Native M4 Mac target (default)
+[target.aarch64-apple-darwin]
+rustflags = [
+  # Enable all CPU features for performance
+  "-C", "target-cpu=native",
+]
+
+# Build profiles are defined in workspace Cargo.toml
+
+# Environment variables for cross-compilation
+[env]
+# Prevent linking with system libraries during cross-compilation
+CARGO_TARGET_THUMBV7EM_NONE_EABIHF_LINKER = "rust-lld"

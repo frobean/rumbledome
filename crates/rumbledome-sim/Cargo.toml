@@ -1,0 +1,53 @@
+# RumbleDome Desktop Simulator
+# 
+# 🔗 T4-BUILD-006: Simulator Crate Configuration
+# Derived From: T3-BUILD-006 (Desktop Simulation) + physics modeling requirements
+# AI Traceability: Algorithm validation, physics simulation, interactive testing
+
+[package]
+name = "rumbledome-sim"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "Desktop simulator for RumbleDome boost controller"
+license = "CC-BY-NC-4.0"
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Local dependencies  
+rumbledome-hal = { path = "../rumbledome-hal", features = ["mock", "std"] }
+rumbledome-core = { path = "../rumbledome-core", features = ["std"] }
+rumbledome-protocol = { path = "../rumbledome-protocol", features = ["std"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# CLI interface
+clap = { workspace = true, features = ["derive"] }
+console = { workspace = true }
+
+# Logging
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# Configuration
+directories = { workspace = true }
+
+# Math utilities
+approx = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+
+[[bin]]
+name = "rumbledome-sim"
+path = "src/main.rs"

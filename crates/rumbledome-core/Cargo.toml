@@ -1,0 +1,46 @@
+# RumbleDome Core Control Logic
+# 
+# 🔗 T4-BUILD-003: Core Crate Configuration  
+# Derived From: T3-BUILD-003 (Core Control State Machine) + no_std requirements
+# AI Traceability: Hardware-independent control logic, safety systems, learning algorithms
+
+[package]
+name = "rumbledome-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "Core control logic for RumbleDome boost controller"
+license = "CC-BY-NC-4.0" 
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Local dependencies
+rumbledome-hal = { path = "../rumbledome-hal" }
+
+# Workspace dependencies
+serde = { workspace = true, features = ["derive"] }
+heapless = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+
+# Math utilities for embedded
+libm = { version = "0.2", default-features = false }
+
+# Optional std support
+log = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Testing utilities
+approx = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+[features]
+default = []
+
+# Enable std library (for desktop builds)
+std = ["log", "rumbledome-hal/std"]
+
+# Mock HAL for testing
+mock = ["rumbledome-hal/mock", "std"]
+
+[lib]
+name = "rumbledome_core"

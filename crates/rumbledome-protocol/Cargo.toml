@@ -1,0 +1,36 @@
+# RumbleDome JSON/CLI Protocol Definitions
+# 
+# 🔗 T4-BUILD-004: Protocol Crate Configuration
+# Derived From: T3-BUILD-004 (JSON Protocol Specification) + serialization requirements  
+# AI Traceability: Configuration protocol, diagnostic messages, CLI interface
+
+[package]
+name = "rumbledome-protocol"
+version = "0.1.0"
+edition = "2021"
+authors = ["RumbleDome Project"]
+description = "JSON protocol definitions for RumbleDome boost controller"
+license = "CC-BY-NC-4.0"
+repository = "https://github.com/user/rumbledome"
+
+[dependencies]
+# Local dependencies
+rumbledome-core = { path = "../rumbledome-core" }
+
+# Workspace dependencies
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+heapless = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+
+[features]
+default = []
+
+# Enable std library for desktop builds
+std = ["serde_json/std", "rumbledome-core/std"]
+
+[lib]
+name = "rumbledome_protocol"
